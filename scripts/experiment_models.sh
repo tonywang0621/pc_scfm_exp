@@ -2,6 +2,9 @@
 
 EXPERIMENT_MODELS=(
   "mecge|configs/ecg_baseline_wander_mecg_e.yaml|ptbxl_lead2_baseline_wander_mecg_e|mecg_e"
+  "pc_scfm|configs/ecg_baseline_wander_pc_scfm.yaml|ptbxl_lead2_baseline_wander_pc_scfm|pc_scfm"
+  "pc_scfm_rl_no_flow|configs/ecg_baseline_wander_pc_scfm_rl_no_flow.yaml|ptbxl_lead2_baseline_wander_pc_scfm_rl_no_flow|pc_scfm"
+  "pc_scfm_rl_no_flow_no_attention|configs/ecg_baseline_wander_pc_scfm_rl_no_flow_no_attention.yaml|ptbxl_lead2_baseline_wander_pc_scfm_rl_no_flow_no_attention|pc_scfm"
   "fir_filter|configs/ecg_baseline_wander_fir_filter.yaml|ptbxl_lead2_baseline_wander_fir_filter|fir_filter"
   "iir_filter|configs/ecg_baseline_wander_iir_filter.yaml|ptbxl_lead2_baseline_wander_iir_filter|iir_filter"
   "drnn|configs/ecg_baseline_wander_drnn.yaml|ptbxl_lead2_baseline_wander_drnn|drnn"

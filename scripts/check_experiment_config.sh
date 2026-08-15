@@ -117,9 +117,6 @@ EXPECTED_BY_MODEL = {
         ("model", "dense_channel"): 64,
         ("model", "attention_heads"): 8,
         ("model", "attention_dropout"): 0.0,
-        ("model", "attention_position"): "before_mamba",
-        ("model", "use_time_attention"): True,
-        ("model", "use_freq_attention"): True,
         ("model", "pcscfm_enabled"): True,
     },
     "eddm": {
@@ -240,6 +237,9 @@ EXPECTED_MAMBATTENTION_VARIANTS = {
 EXPECTED_PCSCFM_VARIANTS = {
     "ecg_baseline_wander_pc_scfm.yaml": {
         ("model", "phase_representation"): "raw",
+        ("model", "attention_position"): "before_mamba",
+        ("model", "use_time_attention"): True,
+        ("model", "use_freq_attention"): True,
         ("model", "use_flow_proposal"): None,
         ("model", "flow_nfe"): 4,
         ("model", "flow_samples"): 4,
@@ -248,6 +248,20 @@ EXPECTED_PCSCFM_VARIANTS = {
     },
     "ecg_baseline_wander_pc_scfm_rl_no_flow.yaml": {
         ("model", "phase_representation"): "raw",
+        ("model", "attention_position"): "before_mamba",
+        ("model", "use_time_attention"): True,
+        ("model", "use_freq_attention"): True,
+        ("model", "use_flow_proposal"): False,
+        ("model", "flow_nfe"): 1,
+        ("model", "flow_samples"): 1,
+        ("model", "loss_fn"): "time+com+con+lf+morph+bc+value+risk",
+        ("model", "lambda_flow"): 0.0,
+    },
+    "ecg_baseline_wander_pc_scfm_rl_no_flow_no_attention.yaml": {
+        ("model", "phase_representation"): "raw",
+        ("model", "attention_position"): "before_mamba",
+        ("model", "use_time_attention"): False,
+        ("model", "use_freq_attention"): False,
         ("model", "use_flow_proposal"): False,
         ("model", "flow_nfe"): 1,
         ("model", "flow_samples"): 1,
