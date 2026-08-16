@@ -100,6 +100,29 @@ EXPECTED_BY_MODEL = {
         ("model", "frft_order_min"): 0.05,
         ("model", "frft_order_max"): 1.95,
     },
+    "mambattention_stfrft_bag_ecg": {
+        ("model", "dense_channel"): 64,
+        ("model", "attention_heads"): 8,
+        ("model", "attention_dropout"): 0.0,
+        ("model", "loss_fn"): "time+mse+cos+max+com+lf+morph",
+        ("model", "lambda_mse"): 0.6,
+        ("model", "lambda_cos"): 0.15,
+        ("model", "lambda_max"): 0.08,
+        ("model", "mad_topk"): 8,
+        ("model", "lambda_lf"): 0.1,
+        ("model", "lambda_morph"): 0.02,
+        ("model", "time_frequency_transform"): "stfrft",
+        ("model", "learnable_frft_order"): True,
+        ("model", "frft_order_init"): 0.9,
+        ("model", "frft_order_min"): 0.05,
+        ("model", "frft_order_max"): 1.95,
+        ("model", "baseline_gate_init"): 1.0,
+        ("model", "baseline_gate_min"): 0.2,
+        ("model", "baseline_gate_max"): 1.3,
+        ("model", "baseline_blend_init"): 0.05,
+        ("model", "baseline_blend_max"): 0.6,
+        ("model", "baseline_gate_smooth"): True,
+    },
     "mambattention_stfrft_lf_morph_ecg": {
         ("model", "dense_channel"): 64,
         ("model", "attention_heads"): 8,
@@ -228,6 +251,7 @@ EXPECTED_MAMBATTENTION_VARIANTS = {
     "ecg_baseline_wander_mambattention_post_no_time_attention.yaml": ("after_mamba", False, True),
     "ecg_baseline_wander_mambattention_post_no_freq_attention.yaml": ("after_mamba", True, False),
     "ecg_baseline_wander_mambattention_stfrft.yaml": ("before_mamba", True, True),
+    "ecg_baseline_wander_mambattention_stfrft_bag.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_lf_morph.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_no_time_attention.yaml": ("before_mamba", False, True),
     "ecg_baseline_wander_mambattention_stfrft_no_freq_attention.yaml": ("before_mamba", True, False),
@@ -311,7 +335,7 @@ for path in CONFIGS:
     for key_path, expected in EXPECTED_BY_MODEL.get(model_name, {}).items():
         check_value(errors, data, key_path, expected, name)
 
-    if model_name in {"mambattention_ecg", "mambattention_stfrft_ecg", "mambattention_stfrft_lf_morph_ecg"}:
+    if model_name in {"mambattention_ecg", "mambattention_stfrft_ecg", "mambattention_stfrft_bag_ecg", "mambattention_stfrft_lf_morph_ecg"}:
         expected_variant = EXPECTED_MAMBATTENTION_VARIANTS.get(name)
         if expected_variant is None:
             errors.append(f"{name}: unknown MambAttention variant config name.")

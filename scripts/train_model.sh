@@ -26,6 +26,9 @@ case "$MODEL" in
   mambattention_stfrft|mambattention_stfrft_ecg)
     CONFIG="configs/ecg_baseline_wander_mambattention_stfrft.yaml"
     ;;
+  mambattention_stfrft_bag|mambattention_stfrft_bag_ecg)
+    CONFIG="configs/ecg_baseline_wander_mambattention_stfrft_bag.yaml"
+    ;;
   mambattention_stfrft_lf_morph|mambattention_stfrft_lf_morph_ecg)
     CONFIG="configs/ecg_baseline_wander_mambattention_stfrft_lf_morph.yaml"
     ;;
@@ -58,7 +61,7 @@ case "$MODEL" in
     ;;
   *)
     echo "Unknown model: $MODEL" >&2
-    echo "Expected one of: pc_scfm, pc_scfm_rl_no_flow, pc_scfm_rl_no_flow_no_attention, mecg_e, mambattention, mambattention_stfrft, mambattention_stfrft_lf_morph, eddm, fcn_dae, deepfilter, descod_ecg_1shot, descod_ecg_5shot, descod_ecg_10shot, drnn, fir_filter, iir_filter" >&2
+    echo "Expected one of: pc_scfm, pc_scfm_rl_no_flow, pc_scfm_rl_no_flow_no_attention, mecg_e, mambattention, mambattention_stfrft, mambattention_stfrft_bag, mambattention_stfrft_lf_morph, eddm, fcn_dae, deepfilter, descod_ecg_1shot, descod_ecg_5shot, descod_ecg_10shot, drnn, fir_filter, iir_filter" >&2
     exit 2
     ;;
 esac

@@ -1013,6 +1013,26 @@ class MECGECore(nn.Module):
         if "time" in self.loss_fn:
             loss_time = F.l1_loss(clean_audio, restored_audio, reduction="none")
             loss = loss + 0.5 * self._masked_mean(loss_time / norm_factor.squeeze(-1), valid_mask)
+        if "mse" in self.loss_fn:
+            loss_mse = F.mse_loss(clean_audio, restored_audio, reduction="none")
+            loss = loss + self._masked_mean(loss_mse / norm_factor.squeeze(-1).pow(2), valid_mask) * self.h.get("lambda_mse", 0.5)
+        if "cos" in self.loss_fn:
+            clean_c = clean_audio - clean_audio.mean(dim=-1, keepdim=True)
+            restored_c = restored_audio - restored_audio.mean(dim=-1, keepdim=True)
+            if valid_mask is not None:
+                mask = valid_mask.squeeze(1).to(clean_audio.device, dtype=clean_audio.dtype)
+                clean_c = clean_c * mask
+                restored_c = restored_c * mask
+            cos_sim = F.cosine_similarity(restored_c, clean_c, dim=-1, eps=1.0e-8)
+            loss = loss + (1.0 - cos_sim).mean() * self.h.get("lambda_cos", 0.1)
+        if "max" in self.loss_fn:
+            abs_error = (restored_audio - clean_audio).abs()
+            if valid_mask is not None:
+                mask = valid_mask.squeeze(1).to(abs_error.device, dtype=torch.bool)
+                abs_error = abs_error.masked_fill(~mask, 0.0)
+            topk = min(self.h.get("mad_topk", 8), abs_error.shape[-1])
+            max_loss = abs_error.topk(topk, dim=-1).values.mean(dim=-1)
+            loss = loss + max_loss.mean() * self.h.get("lambda_max", 0.05)
         if "com" in self.loss_fn:
             loss_com = F.mse_loss(clean_com, restored_com, reduction="none") * 2
             loss = loss + 0.5 * (loss_com / norm_factor.unsqueeze(-1)).mean()
