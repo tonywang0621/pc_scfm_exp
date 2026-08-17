@@ -257,6 +257,12 @@ def train():
         val_pccs = list(state.get("val_pccs", val_pccs))
         val_metric_history = list(state.get("val_metric_history", val_metric_history))
         logger.info(f"Resumed training from {resume_checkpoint} at step {step}.")
+        if patience_counter >= patience:
+            logger.info(
+                f"Resume checkpoint already reached early stopping patience "
+                f"({patience_counter}/{patience}); skipping training and running final evaluation."
+            )
+            stop_training = True
 
     progress_bar = tqdm(
         total=args.training.train_iterations,
