@@ -9,7 +9,7 @@ DATA_DIR="$ROOT_DIR/data/ecg_baseline_wander/processed"
 BASELINE_MODEL="mecge"
 BATCH_SIZE="64"
 DEVICE=""
-FORCE=1
+FORCE=0
 SKIP_INFERENCE=0
 SKIP_STATS=0
 CORRECTION="holm"
@@ -31,8 +31,8 @@ Options:
   --baseline NAME       Baseline model key from experiment_models.sh. Default: mecge
   --batch-size N        Inference batch size. Default: 64
   --device DEVICE       Passed to inference.py, e.g. cuda:0 or cpu. Default: auto
-  --force              Re-run inference even if metrics_per_window.csv exists. Default behavior
-  --skip-existing      Skip inference outputs that already have metrics_per_window.csv
+  --force              Re-run inference/statistics even if output files exist
+  --skip-existing      Skip existing outputs. Default behavior
   --skip-inference      Only run statistics from existing inference outputs
   --skip-stats          Only run inference
   --correction METHOD   none, bonferroni, or holm. Default: holm
@@ -176,6 +176,10 @@ run_stats_if_available() {
   fi
   if [[ ! -f "$candidate_csv" ]]; then
     echo "SKIP stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: missing $candidate_csv"
+    return 0
+  fi
+  if [[ "$FORCE" -eq 0 && -f "$output_csv" ]]; then
+    echo "SKIP stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: existing $output_csv"
     return 0
   fi
 
