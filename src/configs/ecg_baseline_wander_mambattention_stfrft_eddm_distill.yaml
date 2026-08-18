@@ -96,11 +96,9 @@ model:
   hop_size: 8
   win_size: 64
   beta: 2
-  loss_fn: "time+mse+cos+prd+com+con+dual_noise+teacher"
-  lambda_mse: 0.5
-  lambda_cos: 0.15
-  lambda_prd: 0.4
+  loss_fn: "time+mse+com+con+dual_noise+teacher"
+  lambda_mse: 0.7
   lambda_dual_baseline: 0.2
-  lambda_dual_residual: 0.1
+  lambda_dual_residual: 0.15
   lambda_teacher_l1: 0.25
-  lambda_teacher_mse: 0.15
+  lambda_teacher_mse: 0.2
