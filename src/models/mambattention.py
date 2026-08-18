@@ -102,7 +102,7 @@ class LightweightDAPP2d(nn.Module):
         return self.fuse(torch.cat(features, dim=1)) + x
 
 
-class DistilledResidualDualNoiseMambAttentionCore(MECGECore):
+class DualPathDAPPMambAttentionCore(MECGECore):
     def __init__(self, config, block_cls=MambAttentionBlock):
         super().__init__(config, block_cls=block_cls)
         h = self.h
@@ -192,7 +192,7 @@ class DistilledResidualDualNoiseMambAttentionCore(MECGECore):
             noisy_audio = noisy_audio.unsqueeze(1)
         if noisy_audio.shape[1] != 1:
             raise ValueError(
-                f"MambAttention-STFrFT distilled dual-noise expects single-lead input shaped [B, 1, T], got {noisy_audio.shape}."
+                f"MambAttention-STFrFT dual-path DAPP expects single-lead input shaped [B, 1, T], got {noisy_audio.shape}."
             )
         norm_factor = self._norm_factor(noisy_audio)
         noisy_audio_norm = (noisy_audio * norm_factor).squeeze(1)
@@ -261,6 +261,9 @@ class DistilledResidualDualNoiseMambAttentionCore(MECGECore):
         if "teacher" in self.loss_fn:
             loss = loss + self._teacher_loss(restored_audio, teacher_audio, norm_factor, valid_mask)
         return loss
+
+
+DistilledResidualDualNoiseMambAttentionCore = DualPathDAPPMambAttentionCore
 
 
 class BaselineAwareGatedMambAttentionCore(MECGECore):
@@ -388,3 +391,15 @@ class MambAttentionSTFrFTEDDMDistilledDualNoiseECGDenoiser(ECGDenoisingModel):
         if teacher_audio is not None and teacher_audio.ndim == 2:
             teacher_audio = teacher_audio.unsqueeze(1)
         return self.core(clean, noisy, valid_mask=valid_mask, teacher_audio=teacher_audio)
+
+
+@register_model("mambattention_stfrft_dualpath_dapp_ecg")
+class MambAttentionSTFrFTDualPathDAPPECGDenoiser(ECGDenoisingModel):
+    block_cls = MambAttentionBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = DualPathDAPPMambAttentionCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
