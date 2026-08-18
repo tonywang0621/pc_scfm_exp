@@ -81,10 +81,9 @@ model:
   win_size: 64
   beta: 2
   input_size: 1
-  hidden_size: 64
-  lstm_layers: 1
-  dense_layers: [64, 64]
+  lstm_hidden_sizes: [64, 32, 32, 32, 32]
+  dense_layers: []
+  output_size: 1
   dropout: 0.0
   residual: False
   loss_fn: "mse"
-

@@ -219,9 +219,9 @@ EXPECTED_BY_MODEL = {
     "drnn": {
         ("model", "dense_channel"): 64,
         ("model", "input_size"): 1,
-        ("model", "hidden_size"): 64,
-        ("model", "lstm_layers"): 1,
-        ("model", "dense_layers"): [64, 64],
+        ("model", "lstm_hidden_sizes"): [64, 32, 32, 32, 32],
+        ("model", "dense_layers"): [],
+        ("model", "output_size"): 1,
         ("model", "dropout"): 0.0,
         ("model", "residual"): False,
         ("model", "loss_fn"): "mse",

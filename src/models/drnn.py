@@ -10,33 +10,59 @@ except ImportError:
 
 @register_model("drnn")
 class DRNNDenoiser(nn.Module):
+    """Deep recurrent denoising network following Antczak's DRNN layout."""
+
     def __init__(
         self,
         input_size=1,
-        hidden_size=64,
-        lstm_layers=1,
-        dense_layers=(64, 64),
+        lstm_hidden_sizes=(64, 32, 32, 32, 32),
+        hidden_size=None,
+        lstm_layers=None,
+        dense_layers=(),
         dropout=0.0,
         residual=False,
+        output_size=1,
         **kwargs,
     ):
         super().__init__()
         self.residual = bool(residual)
-        self.lstm = nn.LSTM(
-            input_size=int(input_size),
-            hidden_size=int(hidden_size),
-            num_layers=int(lstm_layers),
-            batch_first=True,
-            dropout=float(dropout) if int(lstm_layers) > 1 else 0.0,
-        )
+        self.input_size = int(input_size)
+        self.output_size = int(output_size)
+
+        if lstm_hidden_sizes is None:
+            if hidden_size is None:
+                hidden_size = 64
+            if lstm_layers is None:
+                lstm_layers = 1
+            lstm_hidden_sizes = [int(hidden_size)] * int(lstm_layers)
+        elif isinstance(lstm_hidden_sizes, int):
+            lstm_hidden_sizes = [int(lstm_hidden_sizes)]
+        else:
+            lstm_hidden_sizes = [int(width) for width in lstm_hidden_sizes]
+        if not lstm_hidden_sizes:
+            raise ValueError("lstm_hidden_sizes must contain at least one LSTM layer.")
+
+        recurrent_layers = []
+        in_features = self.input_size
+        for hidden_width in lstm_hidden_sizes:
+            recurrent_layers.append(
+                nn.LSTM(
+                    input_size=in_features,
+                    hidden_size=hidden_width,
+                    num_layers=1,
+                    batch_first=True,
+                )
+            )
+            in_features = hidden_width
+        self.recurrent_layers = nn.ModuleList(recurrent_layers)
+        self.dropout = nn.Dropout(float(dropout)) if float(dropout) > 0.0 else nn.Identity()
 
         layers = []
-        in_features = int(hidden_size)
         for width in dense_layers:
             layers.append(nn.Linear(in_features, int(width)))
             layers.append(nn.ReLU())
             in_features = int(width)
-        layers.append(nn.Linear(in_features, 1))
+        layers.append(nn.Linear(in_features, self.output_size))
         self.head = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -44,11 +70,15 @@ class DRNNDenoiser(nn.Module):
         if x.ndim == 2:
             x = x.unsqueeze(1)
             squeeze = True
-        if x.ndim != 3 or x.shape[1] != 1:
+        if x.ndim != 3 or x.shape[1] != self.input_size:
             raise ValueError(f"Expected ECG shaped [B, T] or [B, 1, T], got {tuple(x.shape)}.")
 
         sequence = x.transpose(1, 2)
-        features, _ = self.lstm(sequence)
+        features = sequence
+        for index, layer in enumerate(self.recurrent_layers):
+            features, _ = layer(features)
+            if index != len(self.recurrent_layers) - 1:
+                features = self.dropout(features)
         restored = self.head(features).transpose(1, 2)
         if self.residual:
             restored = x + restored

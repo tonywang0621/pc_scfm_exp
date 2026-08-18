@@ -497,6 +497,9 @@ def train():
         model.eval()
 
         eval_dir = results_dir / ckpt_name
+        if eval_dir.exists():
+            logger.info(f"Overwriting existing evaluation directory: {eval_dir}")
+            shutil.rmtree(eval_dir)
         eval_dir.mkdir(parents=True, exist_ok=True)
 
         loss_curve_path = plot_loss_curves(
@@ -522,15 +525,7 @@ def train():
             )
             eval_items.append((external_name, external_dataset, external_loader))
 
-        pending_eval_items = []
-        for eval_name, eval_dataset, eval_loader in eval_items:
-            metrics_path = eval_dir / f"metrics_{eval_name}.yaml"
-            if metrics_path.exists():
-                logger.info(f"Skipping {ckpt_name} | {eval_name}: existing {metrics_path}")
-                continue
-            pending_eval_items.append((eval_name, eval_dataset, eval_loader))
-
-        for eval_name, eval_dataset, _ in pending_eval_items:
+        for eval_name, eval_dataset, _ in eval_items:
             prediction_paths = plot_prediction_results(
                 model, eval_dataset, device, eval_dir,
                 num_samples=3, seed=args.seed, eps=args.dataset.eps, fs=fs,
@@ -539,7 +534,7 @@ def train():
             for prediction_path in prediction_paths:
                 logger.info(f"Saved prediction plot to {prediction_path}")
 
-        for eval_name, _, eval_loader in pending_eval_items:
+        for eval_name, _, eval_loader in eval_items:
             metrics_dict = get_reconstruction_metrics(
                 model, eval_loader, device, fs=fs, low_freq_hz=low_freq_hz, eps=args.dataset.eps
             )
@@ -556,26 +551,23 @@ def train():
                 yaml.safe_dump(metrics_dict, f, sort_keys=False)
 
         complexity_path = eval_dir / "complexity_summary.yaml"
-        if complexity_path.exists():
-            logger.info(f"Skipping {ckpt_name} | complexity: existing {complexity_path}")
-        else:
-            complexity = profile_model_complexity(
-                model,
-                device,
-                input_length=int(args.dataset.get("window_size", 512)),
-                batch_size=1,
-            )
-            logger.info('\n')
-            logger.info(separator)
-            logger.info(f"{ckpt_name} | complexity")
-            logger.info(f"{'Metric':>24} | {'Value':>12}")
-            logger.info(separator)
-            for key, value in complexity.items():
-                display_name = metric_display_map.get(key, key)
-                logger.info(f"{display_name:>24} | {value:>12.4f}")
-            logger.info(separator + "\n")
-            with open(complexity_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(complexity, f, sort_keys=False)
+        complexity = profile_model_complexity(
+            model,
+            device,
+            input_length=int(args.dataset.get("window_size", 512)),
+            batch_size=1,
+        )
+        logger.info('\n')
+        logger.info(separator)
+        logger.info(f"{ckpt_name} | complexity")
+        logger.info(f"{'Metric':>24} | {'Value':>12}")
+        logger.info(separator)
+        for key, value in complexity.items():
+            display_name = metric_display_map.get(key, key)
+            logger.info(f"{display_name:>24} | {value:>12.4f}")
+        logger.info(separator + "\n")
+        with open(complexity_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(complexity, f, sort_keys=False)
 
     
             

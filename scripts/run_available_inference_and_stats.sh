@@ -9,7 +9,7 @@ DATA_DIR="$ROOT_DIR/data/ecg_baseline_wander/processed"
 BASELINE_MODEL="mecge"
 BATCH_SIZE="64"
 DEVICE=""
-FORCE=0
+FORCE=1
 SKIP_INFERENCE=0
 SKIP_STATS=0
 CORRECTION="holm"
@@ -31,8 +31,8 @@ Options:
   --baseline NAME       Baseline model key from experiment_models.sh. Default: mecge
   --batch-size N        Inference batch size. Default: 64
   --device DEVICE       Passed to inference.py, e.g. cuda:0 or cpu. Default: auto
-  --force              Re-run inference/statistics even if output files exist
-  --skip-existing      Skip existing outputs. Default behavior
+  --force              Re-run inference/statistics even if output files exist. Default behavior
+  --skip-existing      Skip existing outputs
   --skip-inference      Only run statistics from existing inference outputs
   --skip-stats          Only run inference
   --correction METHOD   none, bonferroni, or holm. Default: holm
@@ -139,6 +139,10 @@ run_inference_if_available() {
   fi
 
   echo "RUN inference: $model_key / $dataset_key"
+  if [[ "$FORCE" -eq 1 && -d "$output_dir" ]]; then
+    echo "OVERWRITE inference: removing existing $output_dir"
+    rm -rf "$output_dir"
+  fi
   mkdir -p "$output_dir"
 
   local cmd=(
