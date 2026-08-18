@@ -52,7 +52,7 @@ class LANLFilterModule(nn.Module):
 
 
 class DilatedLANLFilterModule(nn.Module):
-    def __init__(self, in_channels, layers, kernels=(5, 9, 15), dilation=3):
+    def __init__(self, in_channels, layers, kernels=(3, 5, 9, 15), dilation=3):
         super().__init__()
         branch_channels = int(layers) // (2 * len(kernels))
         self.out_channels = branch_channels * 2 * len(kernels)
@@ -78,7 +78,7 @@ class _DeepFilterBlock(nn.Module):
         layers,
         dilated=False,
         kernels=(3, 5, 9, 15),
-        dilated_kernels=(5, 9, 15),
+        dilated_kernels=(3, 5, 9, 15),
         dilation=3,
         dropout=0.4,
     ):
@@ -110,16 +110,25 @@ class DeepFilterDenoiser(nn.Module):
         layers=(64, 64, 32, 32, 16, 16),
         dilated_pattern=(False, True, False, True, False, True),
         kernels=(3, 5, 9, 15),
-        dilated_kernels=(5, 9, 15),
+        dilated_kernels=(3, 5, 9, 15),
         dilation=3,
         dropout=0.4,
         output_kernel_size=9,
-        loss_fn="mse",
+        loss_fn="ssd+mad",
+        ssd_weight=1.0,
+        mad_weight=1.0,
         **kwargs,
     ):
         super().__init__()
-        if loss_fn != "mse":
-            raise ValueError("DeepFilterDenoiser currently supports only model.loss_fn='mse'.")
+        self.loss_terms = set(str(loss_fn).split("+"))
+        unsupported_terms = self.loss_terms - {"mse", "ssd", "mad"}
+        if unsupported_terms:
+            raise ValueError(
+                "DeepFilterDenoiser supports model.loss_fn terms 'mse', 'ssd', and 'mad'; "
+                f"got unsupported terms: {sorted(unsupported_terms)}."
+            )
+        self.ssd_weight = float(ssd_weight)
+        self.mad_weight = float(mad_weight)
         if len(layers) != len(dilated_pattern):
             raise ValueError("layers and dilated_pattern must have the same length.")
 
@@ -170,12 +179,27 @@ class DeepFilterDenoiser(nn.Module):
             clean = clean.unsqueeze(1)
 
         pred = self.forward(noisy)
-        loss = F.mse_loss(pred, clean, reduction="none")
+        error = pred - clean
         if valid_mask is not None:
-            valid_mask = valid_mask.to(device=device, dtype=loss.dtype)
+            valid_mask = valid_mask.to(device=device, dtype=error.dtype)
             if valid_mask.ndim == 2:
                 valid_mask = valid_mask.unsqueeze(1)
-            loss = (loss * valid_mask).sum() / valid_mask.sum().clamp_min(1.0)
+            error = error * valid_mask
+            valid_count = valid_mask.sum(dim=(1, 2)).clamp_min(1.0)
         else:
-            loss = loss.mean()
+            valid_count = torch.full(
+                (error.shape[0],),
+                error.shape[1] * error.shape[2],
+                device=error.device,
+                dtype=error.dtype,
+            )
+
+        loss = torch.zeros((), device=error.device, dtype=error.dtype)
+        squared_error = error.pow(2)
+        if "mse" in self.loss_terms:
+            loss = loss + squared_error.sum(dim=(1, 2)).div(valid_count).mean()
+        if "ssd" in self.loss_terms:
+            loss = loss + self.ssd_weight * squared_error.sum(dim=(1, 2)).mean()
+        if "mad" in self.loss_terms:
+            loss = loss + self.mad_weight * error.abs().amax(dim=(1, 2)).mean()
         return loss

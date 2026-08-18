@@ -84,8 +84,10 @@ model:
   layers: [64, 64, 32, 32, 16, 16]
   dilated_pattern: [False, True, False, True, False, True]
   kernels: [3, 5, 9, 15]
-  dilated_kernels: [5, 9, 15]
+  dilated_kernels: [3, 5, 9, 15]
   dilation: 3
   dropout: 0.4
   output_kernel_size: 9
-  loss_fn: "mse"
+  loss_fn: "ssd+mad"
+  ssd_weight: 1.0
+  mad_weight: 1.0
