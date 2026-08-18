@@ -35,6 +35,8 @@ class ECGBaselineWanderDataset(Dataset):
       clean_reference or target: ECG clean reference
 
     Arrays may be [N, T] or [N, 1, T]. The loader returns (noisy_ecg, clean_reference).
+    If `teacher_prediction_key` is configured and present in the NPZ, it additionally
+    returns an all-valid mask and the teacher prediction for distillation models.
     """
 
     split_file_map = {
@@ -77,6 +79,14 @@ class ECGBaselineWanderDataset(Dataset):
             raise ValueError(
                 f"noisy and clean arrays must have the same length, got {len(self.noisy)} and {len(self.clean)}."
             )
+        teacher_key = kwargs.get("teacher_prediction_key")
+        self.teacher = None
+        if teacher_key and teacher_key in loaded:
+            self.teacher = _as_single_lead_tensor(loaded[teacher_key])
+            if len(self.teacher) != len(self.noisy):
+                raise ValueError(
+                    f"{teacher_key} length {len(self.teacher)} does not match ECG length {len(self.noisy)}."
+                )
 
         self._validate_ptbxl_fold_metadata(loaded, data_mode, kwargs.get("split"))
 
@@ -84,6 +94,9 @@ class ECGBaselineWanderDataset(Dataset):
         return len(self.noisy)
 
     def __getitem__(self, index):
+        if self.teacher is not None:
+            valid_mask = torch.ones_like(self.noisy[index])
+            return self.noisy[index], self.clean[index], valid_mask, self.teacher[index]
         return self.noisy[index], self.clean[index]
 
     def _validate_ptbxl_fold_metadata(self, loaded, data_mode, split_config):
