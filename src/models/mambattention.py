@@ -311,6 +311,7 @@ class ConditionalResidualFlowRefiner1d(nn.Module):
     def __init__(
         self,
         condition_channels=5,
+        state_channels=1,
         output_channels=1,
         channels=48,
         blocks=4,
@@ -326,7 +327,7 @@ class ConditionalResidualFlowRefiner1d(nn.Module):
             nn.SiLU(),
             nn.Linear(time_dim, time_dim),
         )
-        self.input = nn.Conv1d(condition_channels + 1, channels, 3, padding=1)
+        self.input = nn.Conv1d(condition_channels + state_channels, channels, 3, padding=1)
         dilation_values = tuple(dilations) if dilations else (1,)
         self.blocks = nn.ModuleList(
             [
@@ -464,6 +465,7 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
             self.cfm_adaptive_gate = None
         self.residual_flow = ConditionalResidualFlowRefiner1d(
             condition_channels=self.cfm_condition_channels,
+            state_channels=2,
             output_channels=2,
             channels=int(h.get("cfm_channels", 48)),
             blocks=int(h.get("cfm_blocks", 4)),
