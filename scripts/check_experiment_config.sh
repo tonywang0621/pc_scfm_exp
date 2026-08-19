@@ -179,6 +179,30 @@ EXPECTED_BY_MODEL = {
         ("model", "residual_refine_scale"): 0.5,
         ("model", "baseline_kernel_size"): 129,
     },
+    "mambattention_stfrft_dualpath_dapp_v2_ecg": {
+        ("model", "dense_channel"): 64,
+        ("model", "attention_heads"): 8,
+        ("model", "attention_dropout"): 0.0,
+        ("model", "loss_fn"): "time+mse+com+con+dual_noise+lf+morph",
+        ("model", "lambda_mse"): 0.5,
+        ("model", "lambda_dual_baseline"): 0.25,
+        ("model", "lambda_dual_residual"): 0.2,
+        ("model", "lambda_lf"): 0.01,
+        ("model", "lambda_morph"): 0.05,
+        ("model", "time_frequency_transform"): "stfrft",
+        ("model", "learnable_frft_order"): True,
+        ("model", "frft_order_init"): 0.9,
+        ("model", "frft_order_min"): 0.05,
+        ("model", "frft_order_max"): 1.95,
+        ("model", "use_dapp"): True,
+        ("model", "dapp_time_scales"): [3, 5, 9, 15],
+        ("model", "dapp_freq_scales"): [1, 3],
+        ("model", "dual_noise_head_hidden"): 64,
+        ("model", "residual_refine_scale"): 0.5,
+        ("model", "baseline_refine_gate_init"): 0.08,
+        ("model", "baseline_refine_gate_max"): 0.5,
+        ("model", "baseline_kernel_size"): 129,
+    },
     "pc_scfm": {
         ("model", "dense_channel"): 64,
         ("model", "attention_heads"): 8,
@@ -296,6 +320,7 @@ EXPECTED_MAMBATTENTION_VARIANTS = {
     "ecg_baseline_wander_mambattention_stfrft_bag.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_lf_morph.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp.yaml": ("before_mamba", True, True),
+    "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_v2.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_eddm_distill.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_no_time_attention.yaml": ("before_mamba", False, True),
     "ecg_baseline_wander_mambattention_stfrft_no_freq_attention.yaml": ("before_mamba", True, False),
@@ -381,7 +406,7 @@ for path in CONFIGS:
     for key_path, expected in EXPECTED_BY_MODEL.get(model_name, {}).items():
         check_value(errors, data, key_path, expected, name)
 
-    if model_name in {"mambattention_ecg", "mambattention_stfrft_ecg", "mambattention_stfrft_bag_ecg", "mambattention_stfrft_lf_morph_ecg", "mambattention_stfrft_dualpath_dapp_ecg", "mambattention_stfrft_eddm_distill_ecg"}:
+    if model_name in {"mambattention_ecg", "mambattention_stfrft_ecg", "mambattention_stfrft_bag_ecg", "mambattention_stfrft_lf_morph_ecg", "mambattention_stfrft_dualpath_dapp_ecg", "mambattention_stfrft_dualpath_dapp_v2_ecg", "mambattention_stfrft_eddm_distill_ecg"}:
         expected_variant = EXPECTED_MAMBATTENTION_VARIANTS.get(name)
         if expected_variant is None:
             errors.append(f"{name}: unknown MambAttention variant config name.")

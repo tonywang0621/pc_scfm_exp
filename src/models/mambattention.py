@@ -266,6 +266,37 @@ class DualPathDAPPMambAttentionCore(MECGECore):
 DistilledResidualDualNoiseMambAttentionCore = DualPathDAPPMambAttentionCore
 
 
+class GatedDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        h = self.h
+        self.baseline_refine_gate_max = h.get("baseline_refine_gate_max", 0.5)
+        baseline_refine_gate_init = h.get("baseline_refine_gate_init", 0.08)
+        gate_ratio = baseline_refine_gate_init / self.baseline_refine_gate_max
+        gate_ratio = min(max(gate_ratio, 1.0e-6), 1.0 - 1.0e-6)
+        self.baseline_refine_gate_raw = nn.Parameter(
+            torch.tensor(math.log(gate_ratio / (1.0 - gate_ratio)), dtype=torch.float32)
+        )
+
+    def _baseline_refine_gate(self):
+        return self.baseline_refine_gate_max * torch.sigmoid(self.baseline_refine_gate_raw)
+
+    def _restore_components(self, noisy_audio):
+        restored, com_g, baseline_hat, residual_delta_hat, direct_restored = super()._restore_components(noisy_audio)
+        noisy = noisy_audio.squeeze(1) if noisy_audio.ndim == 3 else noisy_audio
+        baseline_clean = noisy.unsqueeze(1) - self._baseline_projection(baseline_hat)
+        baseline_gate = self._baseline_refine_gate()
+        restored = restored + baseline_gate * (baseline_clean - direct_restored)
+        return restored, com_g, baseline_hat, residual_delta_hat, direct_restored
+
+    def restore_with_metadata(self, noisy_audio, valid_mask=None):
+        restored, metadata = super().restore_with_metadata(noisy_audio, valid_mask=valid_mask)
+        metadata = dict(metadata or {})
+        metadata["baseline_refine_gate"] = self._baseline_refine_gate().detach().view(1)
+        self.last_metadata = metadata
+        return restored, metadata
+
+
 class BaselineAwareGatedMambAttentionCore(MECGECore):
     def __init__(self, config, block_cls=MambAttentionBlock):
         super().__init__(config, block_cls=block_cls)
@@ -400,6 +431,18 @@ class MambAttentionSTFrFTDualPathDAPPECGDenoiser(ECGDenoisingModel):
     def __init__(self, **kwargs):
         nn.Module.__init__(self)
         self.core = DualPathDAPPMambAttentionCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
+
+
+@register_model("mambattention_stfrft_dualpath_dapp_v2_ecg")
+class MambAttentionSTFrFTDualPathDAPPV2ECGDenoiser(ECGDenoisingModel):
+    block_cls = MambAttentionBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = GatedDualPathDAPPMambAttentionCore(
             {"model": kwargs},
             block_cls=self.block_cls,
         )
