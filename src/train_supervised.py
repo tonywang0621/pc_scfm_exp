@@ -159,6 +159,21 @@ def train():
     model_kwargs = OmegaConf.to_container(args.model, resolve=True)
     model = get_model(args['model_name'], **model_kwargs).to(device) 
 
+    init_checkpoint_value = args.training.get("init_checkpoint", None)
+    if init_checkpoint_value and not resume:
+        init_checkpoint = Path(init_checkpoint_value)
+        if not init_checkpoint.exists():
+            raise FileNotFoundError(f"training.init_checkpoint was not found: {init_checkpoint}")
+        init_state = torch.load(init_checkpoint, map_location=device)
+        if isinstance(init_state, dict) and "model_state_dict" in init_state:
+            init_state = init_state["model_state_dict"]
+        load_result = model.load_state_dict(init_state)
+        logger.info(
+            f"Initialized model weights from {init_checkpoint} | "
+            f"missing_keys={len(load_result.missing_keys)} | "
+            f"unexpected_keys={len(load_result.unexpected_keys)}"
+        )
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.training.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.training.train_iterations, eta_min=1e-5

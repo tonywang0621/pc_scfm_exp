@@ -203,6 +203,49 @@ EXPECTED_BY_MODEL = {
         ("model", "baseline_refine_gate_max"): 0.5,
         ("model", "baseline_kernel_size"): 129,
     },
+    "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg": {
+        ("model", "dense_channel"): 64,
+        ("model", "attention_heads"): 8,
+        ("model", "attention_dropout"): 0.0,
+        ("model", "loss_fn"): "time+com+con+dual_noise+lf+morph+cfm",
+        ("model", "lambda_dual_baseline"): 0.2,
+        ("model", "lambda_dual_residual"): 0.15,
+        ("model", "lambda_lf"): 0.03,
+        ("model", "lambda_morph"): 0.02,
+        ("model", "time_frequency_transform"): "stfrft",
+        ("model", "learnable_frft_order"): True,
+        ("model", "frft_order_init"): 0.9,
+        ("model", "frft_order_min"): 0.05,
+        ("model", "frft_order_max"): 1.95,
+        ("model", "use_dapp"): True,
+        ("model", "dapp_time_scales"): [3, 5, 9, 15],
+        ("model", "dapp_freq_scales"): [1, 3],
+        ("model", "dual_noise_head_hidden"): 64,
+        ("model", "residual_refine_scale"): 0.5,
+        ("model", "baseline_kernel_size"): 129,
+        ("model", "cfm_channels"): 64,
+        ("model", "cfm_blocks"): 6,
+        ("model", "cfm_time_dim"): 128,
+        ("model", "cfm_inference_steps"): 4,
+        ("model", "cfm_use_adaptive_gate"): True,
+        ("model", "cfm_gate_hidden"): 64,
+        ("model", "cfm_clean_delta_budget"): 0.6,
+        ("model", "cfm_baseline_delta_budget"): 0.8,
+        ("model", "cfm_project_baseline_delta"): True,
+        ("model", "cfm_clean_lowpass_keep"): 0.25,
+        ("model", "cfm_baseline_gate_init"): 0.15,
+        ("model", "cfm_baseline_gate_max"): 0.6,
+        ("model", "cfm_consistency_blend_init"): 0.25,
+        ("model", "cfm_consistency_blend_max"): 0.5,
+        ("model", "lambda_cfm"): 0.2,
+        ("model", "lambda_cfm_baseline"): 0.2,
+        ("model", "lambda_cfm_recon"): 0.25,
+        ("model", "lambda_cfm_stft"): 0.05,
+        ("model", "lambda_cfm_lf"): 0.03,
+        ("model", "lambda_cfm_deriv"): 0.03,
+        ("model", "lambda_cfm_residual_smooth"): 0.005,
+        ("model", "lambda_cfm_clean_baseline_consistency"): 0.05,
+    },
     "pc_scfm": {
         ("model", "dense_channel"): 64,
         ("model", "attention_heads"): 8,
@@ -321,6 +364,7 @@ EXPECTED_MAMBATTENTION_VARIANTS = {
     "ecg_baseline_wander_mambattention_stfrft_lf_morph.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_v2.yaml": ("before_mamba", True, True),
+    "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_cfm_residual.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_eddm_distill.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_no_time_attention.yaml": ("before_mamba", False, True),
     "ecg_baseline_wander_mambattention_stfrft_no_freq_attention.yaml": ("before_mamba", True, False),
@@ -406,7 +450,7 @@ for path in CONFIGS:
     for key_path, expected in EXPECTED_BY_MODEL.get(model_name, {}).items():
         check_value(errors, data, key_path, expected, name)
 
-    if model_name in {"mambattention_ecg", "mambattention_stfrft_ecg", "mambattention_stfrft_bag_ecg", "mambattention_stfrft_lf_morph_ecg", "mambattention_stfrft_dualpath_dapp_ecg", "mambattention_stfrft_dualpath_dapp_v2_ecg", "mambattention_stfrft_eddm_distill_ecg"}:
+    if model_name in {"mambattention_ecg", "mambattention_stfrft_ecg", "mambattention_stfrft_bag_ecg", "mambattention_stfrft_lf_morph_ecg", "mambattention_stfrft_dualpath_dapp_ecg", "mambattention_stfrft_dualpath_dapp_v2_ecg", "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg", "mambattention_stfrft_eddm_distill_ecg"}:
         expected_variant = EXPECTED_MAMBATTENTION_VARIANTS.get(name)
         if expected_variant is None:
             errors.append(f"{name}: unknown MambAttention variant config name.")
@@ -426,6 +470,15 @@ for path in CONFIGS:
                     check_optional_value(errors, data, key_path, True, name)
                 else:
                     check_value(errors, data, key_path, expected, name)
+
+    if model_name == "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg":
+        loss_tokens = set(str(get_value(data, ("model", "loss_fn"))).split("+"))
+        forbidden_tokens = {"teacher", "distill", "prd", "cos", "max"}
+        overlap = sorted(loss_tokens & forbidden_tokens)
+        if overlap:
+            errors.append(
+                f"{name}: CFM residual model must not use evaluation-metric or EDDM teacher loss tokens: {overlap}"
+            )
             loss_terms = set(str(get_value(data, ("model", "loss_fn"))).split("+"))
             uses_flow = get_value(data, ("model", "use_flow_proposal"))
             if uses_flow is False and "flow" in loss_terms:

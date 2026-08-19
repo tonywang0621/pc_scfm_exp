@@ -266,6 +266,455 @@ class DualPathDAPPMambAttentionCore(MECGECore):
 DistilledResidualDualNoiseMambAttentionCore = DualPathDAPPMambAttentionCore
 
 
+class ResidualFlowTimeEmbedding(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = int(dim)
+
+    def forward(self, t):
+        half = self.dim // 2
+        scale = math.log(10000.0) / max(half - 1, 1)
+        freqs = torch.exp(torch.arange(half, device=t.device, dtype=torch.float32) * -scale)
+        emb = t.float().unsqueeze(1) * freqs.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        if self.dim % 2:
+            emb = F.pad(emb, (0, 1))
+        return emb
+
+
+class ResidualFlowBlock1d(nn.Module):
+    def __init__(self, channels, time_dim, dilation=1, groups=8, dropout=0.0):
+        super().__init__()
+        group_count = min(int(groups), int(channels))
+        while channels % group_count != 0:
+            group_count -= 1
+        padding = int(dilation)
+        self.conv1 = nn.Conv1d(channels, channels, 3, padding=padding, dilation=dilation)
+        self.norm1 = nn.GroupNorm(group_count, channels)
+        self.conv2 = nn.Conv1d(channels, channels, 3, padding=padding, dilation=dilation)
+        self.norm2 = nn.GroupNorm(group_count, channels)
+        self.time_proj = nn.Linear(time_dim, channels)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, time_emb):
+        residual = x
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = F.silu(x + self.time_proj(time_emb).unsqueeze(-1))
+        x = self.dropout(x)
+        x = self.conv2(x)
+        x = self.norm2(x)
+        return F.silu(x + residual)
+
+
+class ConditionalResidualFlowRefiner1d(nn.Module):
+    def __init__(
+        self,
+        condition_channels=5,
+        output_channels=1,
+        channels=48,
+        blocks=4,
+        time_dim=96,
+        groups=8,
+        dropout=0.0,
+        dilations=(1, 2, 4, 8),
+    ):
+        super().__init__()
+        self.time_embedding = nn.Sequential(
+            ResidualFlowTimeEmbedding(time_dim),
+            nn.Linear(time_dim, time_dim),
+            nn.SiLU(),
+            nn.Linear(time_dim, time_dim),
+        )
+        self.input = nn.Conv1d(condition_channels + 1, channels, 3, padding=1)
+        dilation_values = tuple(dilations) if dilations else (1,)
+        self.blocks = nn.ModuleList(
+            [
+                ResidualFlowBlock1d(
+                    channels,
+                    time_dim,
+                    dilation=dilation_values[index % len(dilation_values)],
+                    groups=groups,
+                    dropout=dropout,
+                )
+                for index in range(int(blocks))
+            ]
+        )
+        self.output = nn.Sequential(
+            nn.GroupNorm(1, channels),
+            nn.SiLU(),
+            nn.Conv1d(channels, output_channels, 3, padding=1),
+        )
+
+    def forward(self, residual_state, condition, t):
+        if t.ndim == 0:
+            t = t.expand(residual_state.shape[0])
+        time_emb = self.time_embedding(t)
+        x = self.input(torch.cat([residual_state, condition], dim=1))
+        for block in self.blocks:
+            x = block(x, time_emb)
+        return self.output(x)
+
+
+class CFMAdaptiveGate(nn.Module):
+    def __init__(
+        self,
+        condition_channels,
+        hidden,
+        refine_gate_init,
+        refine_gate_max,
+        baseline_gate_init,
+        baseline_gate_max,
+        blend_init,
+        blend_max,
+    ):
+        super().__init__()
+        self.refine_gate_max = float(refine_gate_max)
+        self.baseline_gate_max = float(baseline_gate_max)
+        self.blend_max = float(blend_max)
+        feature_dim = int(condition_channels) * 2
+        self.net = nn.Sequential(
+            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, int(hidden)),
+            nn.PReLU(int(hidden)),
+            nn.Linear(int(hidden), 3),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        init_values = [
+            self._logit_ratio(refine_gate_init, self.refine_gate_max),
+            self._logit_ratio(baseline_gate_init, self.baseline_gate_max),
+            self._logit_ratio(blend_init, self.blend_max),
+        ]
+        nn.init.constant_(self.net[-1].bias, 0.0)
+        with torch.no_grad():
+            self.net[-1].bias.copy_(torch.tensor(init_values, dtype=torch.float32))
+
+    @staticmethod
+    def _logit_ratio(value, max_value):
+        ratio = min(max(float(value) / max(float(max_value), 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        return math.log(ratio / (1.0 - ratio))
+
+    def forward(self, condition):
+        stats = torch.cat(
+            [
+                condition.abs().mean(dim=-1),
+                condition.std(dim=-1),
+            ],
+            dim=-1,
+        )
+        gates = torch.sigmoid(self.net(stats))
+        clean_gate = self.refine_gate_max * gates[:, 0:1].unsqueeze(-1)
+        baseline_gate = self.baseline_gate_max * gates[:, 1:2].unsqueeze(-1)
+        blend = self.blend_max * gates[:, 2:3].unsqueeze(-1)
+        return clean_gate, baseline_gate, blend
+
+
+class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        h = self.h
+        self.cfm_inference_steps = int(h.get("cfm_inference_steps", 2))
+        self.cfm_train_noise_scale = float(h.get("cfm_train_noise_scale", 0.05))
+        self.cfm_zero_start_prob = float(h.get("cfm_zero_start_prob", 0.5))
+        self.cfm_bridge_noise_scale = float(h.get("cfm_bridge_noise_scale", 0.02))
+        self.cfm_condition_channels = 6
+        self.cfm_use_adaptive_gate = bool(h.get("cfm_use_adaptive_gate", True))
+        self.cfm_clean_delta_budget = float(h.get("cfm_clean_delta_budget", 0.6))
+        self.cfm_baseline_delta_budget = float(h.get("cfm_baseline_delta_budget", 0.8))
+        self.cfm_project_baseline_delta = bool(h.get("cfm_project_baseline_delta", True))
+        self.cfm_clean_lowpass_keep = float(h.get("cfm_clean_lowpass_keep", 0.25))
+        self.cfm_refine_gate_max = float(h.get("cfm_refine_gate_max", 0.6))
+        self.cfm_baseline_gate_max = float(h.get("cfm_baseline_gate_max", 0.6))
+        self.cfm_consistency_blend_max = float(h.get("cfm_consistency_blend_max", 0.5))
+        self.lambda_cfm = float(h.get("lambda_cfm", 0.2))
+        self.lambda_cfm_baseline = float(h.get("lambda_cfm_baseline", self.lambda_cfm))
+        self.lambda_cfm_recon = float(h.get("lambda_cfm_recon", 0.25))
+        self.lambda_cfm_stft = float(h.get("lambda_cfm_stft", 0.05))
+        self.lambda_cfm_lf = float(h.get("lambda_cfm_lf", 0.03))
+        self.lambda_cfm_deriv = float(h.get("lambda_cfm_deriv", 0.03))
+        self.lambda_cfm_residual_smooth = float(h.get("lambda_cfm_residual_smooth", 0.005))
+        self.lambda_cfm_clean_baseline_consistency = float(h.get("lambda_cfm_clean_baseline_consistency", 0.05))
+        gate_init = float(h.get("cfm_refine_gate_init", 0.15))
+        gate_ratio = min(max(gate_init / max(self.cfm_refine_gate_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.cfm_refine_gate_raw = nn.Parameter(
+            torch.tensor(math.log(gate_ratio / (1.0 - gate_ratio)), dtype=torch.float32)
+        )
+        baseline_gate_init = float(h.get("cfm_baseline_gate_init", gate_init))
+        baseline_gate_ratio = min(max(baseline_gate_init / max(self.cfm_baseline_gate_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.cfm_baseline_gate_raw = nn.Parameter(
+            torch.tensor(math.log(baseline_gate_ratio / (1.0 - baseline_gate_ratio)), dtype=torch.float32)
+        )
+        blend_init = float(h.get("cfm_consistency_blend_init", 0.25))
+        blend_ratio = min(max(blend_init / max(self.cfm_consistency_blend_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.cfm_consistency_blend_raw = nn.Parameter(
+            torch.tensor(math.log(blend_ratio / (1.0 - blend_ratio)), dtype=torch.float32)
+        )
+        if self.cfm_use_adaptive_gate:
+            self.cfm_adaptive_gate = CFMAdaptiveGate(
+                condition_channels=self.cfm_condition_channels,
+                hidden=int(h.get("cfm_gate_hidden", 32)),
+                refine_gate_init=gate_init,
+                refine_gate_max=self.cfm_refine_gate_max,
+                baseline_gate_init=baseline_gate_init,
+                baseline_gate_max=self.cfm_baseline_gate_max,
+                blend_init=blend_init,
+                blend_max=self.cfm_consistency_blend_max,
+            )
+        else:
+            self.cfm_adaptive_gate = None
+        self.residual_flow = ConditionalResidualFlowRefiner1d(
+            condition_channels=self.cfm_condition_channels,
+            output_channels=2,
+            channels=int(h.get("cfm_channels", 48)),
+            blocks=int(h.get("cfm_blocks", 4)),
+            time_dim=int(h.get("cfm_time_dim", 96)),
+            groups=int(h.get("cfm_groups", 8)),
+            dropout=float(h.get("cfm_dropout", 0.0)),
+            dilations=tuple(h.get("cfm_dilations", [1, 2, 4, 8])),
+        )
+
+    def _cfm_refine_gate(self):
+        return self.cfm_refine_gate_max * torch.sigmoid(self.cfm_refine_gate_raw)
+
+    def _cfm_baseline_gate(self):
+        return self.cfm_baseline_gate_max * torch.sigmoid(self.cfm_baseline_gate_raw)
+
+    def _cfm_consistency_blend(self):
+        return self.cfm_consistency_blend_max * torch.sigmoid(self.cfm_consistency_blend_raw)
+
+    def _cfm_gates(self, condition):
+        if self.cfm_adaptive_gate is not None:
+            return self.cfm_adaptive_gate(condition)
+        batch = condition.shape[0]
+        clean_gate = self._cfm_refine_gate().view(1, 1, 1).expand(batch, 1, 1)
+        baseline_gate = self._cfm_baseline_gate().view(1, 1, 1).expand(batch, 1, 1)
+        blend = self._cfm_consistency_blend().view(1, 1, 1).expand(batch, 1, 1)
+        return clean_gate, baseline_gate, blend
+
+    def _limit_delta(self, delta, reference, budget_ratio):
+        if budget_ratio <= 0:
+            return delta
+        reference_budget = (
+            reference.abs().mean(dim=-1, keepdim=True)
+            + 0.25 * reference.std(dim=-1, keepdim=True)
+        ).clamp_min(1.0e-6)
+        delta_level = delta.abs().mean(dim=-1, keepdim=True).clamp_min(1.0e-6)
+        scale = (float(budget_ratio) * reference_budget / delta_level).clamp(max=1.0)
+        return delta * scale
+
+    def _flow_condition(self, noisy_audio, base_restored, baseline_hat=None):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        if base_restored.ndim == 2:
+            base_restored = base_restored.unsqueeze(1)
+        estimated_baseline = noisy_audio - base_restored
+        if baseline_hat is None:
+            baseline_hat = estimated_baseline
+        low_noisy = self._baseline_projection(noisy_audio)
+        high_base = base_restored - self._baseline_projection(base_restored)
+        return torch.cat([noisy_audio, base_restored, estimated_baseline, baseline_hat, low_noisy, high_base], dim=1)
+
+    def _sample_flow_start(self, target_residual):
+        start = self.cfm_train_noise_scale * torch.randn_like(target_residual)
+        if self.cfm_zero_start_prob > 0:
+            zero_mask = (
+                torch.rand((target_residual.shape[0], 1, 1), device=target_residual.device)
+                < self.cfm_zero_start_prob
+            )
+            start = torch.where(zero_mask, torch.zeros_like(start), start)
+        return start
+
+    def _flow_matching_loss(self, condition, target_residual, channel_weight=1.0, valid_mask=None):
+        start = self._sample_flow_start(target_residual)
+        t = torch.rand((target_residual.shape[0],), device=target_residual.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_residual)
+        residual_state = (1.0 - t_view) * start + t_view * target_residual + bridge_noise
+        target_velocity = target_residual - start
+        predicted_velocity = self.residual_flow(residual_state, condition, t)
+        loss = F.mse_loss(predicted_velocity, target_velocity, reduction="none")
+        weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
+        return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
+
+    def _integrate_residual_flow(self, condition, steps=None):
+        steps = int(steps or self.cfm_inference_steps)
+        steps = max(steps, 1)
+        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        dt = 1.0 / steps
+        for step in range(steps):
+            t_value = (step + 0.5) / steps
+            t = torch.full((condition.shape[0],), t_value, device=condition.device, dtype=condition.dtype)
+            residual = residual + dt * self.residual_flow(residual, condition, t)
+        return residual
+
+    def _refine_from_base(self, noisy_audio, base_restored, baseline_hat=None):
+        condition = self._flow_condition(noisy_audio, base_restored, baseline_hat=baseline_hat)
+        flow_hat = self._integrate_residual_flow(condition)
+        clean_delta_hat = flow_hat[:, 0:1]
+        baseline_delta_hat = flow_hat[:, 1:2]
+        estimated_baseline = noisy_audio - base_restored
+        clean_low = self._baseline_projection(clean_delta_hat)
+        clean_delta_hat = clean_delta_hat - (1.0 - self.cfm_clean_lowpass_keep) * clean_low
+        if self.cfm_project_baseline_delta:
+            baseline_delta_hat = self._baseline_projection(baseline_delta_hat)
+        clean_delta_hat = self._limit_delta(clean_delta_hat, estimated_baseline, self.cfm_clean_delta_budget)
+        baseline_delta_hat = self._limit_delta(baseline_delta_hat, estimated_baseline, self.cfm_baseline_delta_budget)
+        clean_gate, baseline_gate, consistency_blend = self._cfm_gates(condition)
+        clean_path = base_restored + clean_gate * clean_delta_hat
+        baseline_path = noisy_audio - (estimated_baseline + baseline_gate * baseline_delta_hat)
+        refined = clean_path + consistency_blend * (baseline_path - clean_path)
+        return refined, flow_hat, condition, clean_path, baseline_path
+
+    def restore_one_shot(self, noisy_audio, return_com=False):
+        restored, com_g, baseline_hat, _, _ = self._restore_components(noisy_audio)
+        refined, _, _, _, _ = self._refine_from_base(noisy_audio, restored, baseline_hat=baseline_hat)
+        if return_com:
+            return refined, com_g
+        return refined
+
+    def restore_with_metadata(self, noisy_audio, valid_mask=None):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        if noisy_audio.shape[1] != 1:
+            raise ValueError(
+                f"MambAttention-STFrFT dual-path DAPP CFM expects single-lead input shaped [B, 1, T], got {noisy_audio.shape}."
+            )
+        norm_factor = self._norm_factor(noisy_audio)
+        noisy_audio_norm = noisy_audio * norm_factor
+        base_restored, _, baseline_hat, residual_delta_hat, _ = self._restore_components(noisy_audio_norm)
+        refined, flow_hat, _, _, _ = self._refine_from_base(noisy_audio_norm, base_restored, baseline_hat=baseline_hat)
+        metadata = {
+            "baseline_hat_abs_mean": baseline_hat.detach().abs().mean(dim=-1),
+            "residual_delta_abs_mean": residual_delta_hat.detach().abs().mean(dim=-1),
+            "cfm_clean_delta_abs_mean": flow_hat[:, 0:1].detach().abs().mean(dim=-1),
+            "cfm_baseline_delta_abs_mean": flow_hat[:, 1:2].detach().abs().mean(dim=-1),
+        }
+        clean_gate, baseline_gate, consistency_blend = self._cfm_gates(
+            self._flow_condition(noisy_audio_norm, base_restored, baseline_hat=baseline_hat)
+        )
+        metadata["cfm_refine_gate"] = clean_gate.detach().mean(dim=0).view(1)
+        metadata["cfm_baseline_gate"] = baseline_gate.detach().mean(dim=0).view(1)
+        metadata["cfm_consistency_blend"] = consistency_blend.detach().mean(dim=0).view(1)
+        self.last_metadata = metadata
+        return refined / norm_factor, metadata
+
+    def _multi_resolution_stft_loss(self, clean_audio, restored_audio, valid_mask=None):
+        if self.lambda_cfm_stft <= 0:
+            return clean_audio.new_tensor(0.0)
+        loss = clean_audio.new_tensor(0.0)
+        configs = self.h.get("cfm_stft_configs", [[32, 4, 32], [64, 8, 64], [128, 16, 128]])
+        for n_fft, hop_size, win_size in configs:
+            n_fft = int(n_fft)
+            hop_size = int(hop_size)
+            win_size = int(win_size)
+            if clean_audio.shape[-1] < win_size:
+                continue
+            clean_spec = torch.stft(
+                clean_audio,
+                n_fft=n_fft,
+                hop_length=hop_size,
+                win_length=win_size,
+                window=torch.hann_window(win_size, device=clean_audio.device, dtype=clean_audio.dtype),
+                center=True,
+                pad_mode="reflect",
+                return_complex=True,
+            )
+            restored_spec = torch.stft(
+                restored_audio,
+                n_fft=n_fft,
+                hop_length=hop_size,
+                win_length=win_size,
+                window=torch.hann_window(win_size, device=restored_audio.device, dtype=restored_audio.dtype),
+                center=True,
+                pad_mode="reflect",
+                return_complex=True,
+            )
+            loss = loss + F.smooth_l1_loss(torch.abs(restored_spec), torch.abs(clean_spec))
+        return loss / max(len(configs), 1)
+
+    def _cfm_auxiliary_losses(self, clean_audio, noisy_audio, base_restored, refined, flow_hat, clean_path, baseline_path, valid_mask=None):
+        loss = clean_audio.new_tensor(0.0)
+        if self.lambda_cfm_recon > 0:
+            recon = F.smooth_l1_loss(refined.squeeze(1), clean_audio, reduction="none")
+            loss = loss + self.lambda_cfm_recon * self._masked_mean(recon, valid_mask)
+        if self.lambda_cfm_stft > 0:
+            loss = loss + self.lambda_cfm_stft * self._multi_resolution_stft_loss(clean_audio, refined.squeeze(1), valid_mask)
+        if self.lambda_cfm_lf > 0:
+            target_baseline = self._baseline_projection(noisy_audio - clean_audio.unsqueeze(1))
+            predicted_baseline = self._baseline_projection(noisy_audio - refined)
+            lf_loss = F.smooth_l1_loss(predicted_baseline, target_baseline, reduction="none")
+            loss = loss + self.lambda_cfm_lf * self._masked_mean(lf_loss.squeeze(1), valid_mask)
+        if self.lambda_cfm_deriv > 0:
+            clean_derivative = clean_audio[..., 1:] - clean_audio[..., :-1]
+            refined_derivative = refined.squeeze(1)[..., 1:] - refined.squeeze(1)[..., :-1]
+            deriv_loss = F.smooth_l1_loss(refined_derivative, clean_derivative, reduction="none")
+            derivative_mask = valid_mask[..., 1:] * valid_mask[..., :-1] if valid_mask is not None else None
+            loss = loss + self.lambda_cfm_deriv * self._masked_mean(deriv_loss, derivative_mask)
+        if self.lambda_cfm_residual_smooth > 0:
+            residual_curvature = flow_hat[..., 2:] - 2.0 * flow_hat[..., 1:-1] + flow_hat[..., :-2]
+            smooth_mask = valid_mask[..., 2:] * valid_mask[..., 1:-1] * valid_mask[..., :-2] if valid_mask is not None else None
+            loss = loss + self.lambda_cfm_residual_smooth * self._masked_mean(residual_curvature.abs().sum(dim=1), smooth_mask)
+        if self.lambda_cfm_clean_baseline_consistency > 0:
+            consistency = F.smooth_l1_loss(clean_path, baseline_path, reduction="none")
+            loss = loss + self.lambda_cfm_clean_baseline_consistency * self._masked_mean(consistency.squeeze(1), valid_mask)
+        return loss
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        refined, flow_hat, condition, clean_path, baseline_path = self._refine_from_base(
+            noisy_audio,
+            base_restored,
+            baseline_hat=baseline_hat,
+        )
+        refined_audio = refined.squeeze(1)
+        direct_restored = direct_restored.squeeze(1)
+
+        loss = self._ecg_loss(
+            clean_audio,
+            refined_audio,
+            norm_factor,
+            predicted_com=com_g,
+            valid_mask=valid_mask,
+        )
+        if "dual" in self.loss_fn or "dual_noise" in self.loss_fn:
+            baseline_target = noisy_audio - clean_audio.unsqueeze(1)
+            residual_target = clean_audio.unsqueeze(1) - direct_restored.unsqueeze(1)
+            baseline_loss = F.mse_loss(baseline_hat, baseline_target, reduction="none")
+            residual_loss = F.mse_loss(residual_delta_hat, residual_target, reduction="none")
+            loss = loss + self.lambda_dual_baseline * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+            loss = loss + self.lambda_dual_residual * self._masked_mean(residual_loss.squeeze(1), valid_mask)
+        if "cfm" in self.loss_fn or "flow_matching" in self.loss_fn:
+            estimated_baseline = noisy_audio - base_restored.detach()
+            true_baseline = noisy_audio - clean_audio.unsqueeze(1)
+            target_clean_residual = clean_audio.unsqueeze(1) - base_restored.detach()
+            target_baseline_residual = true_baseline - estimated_baseline
+            target_residual = torch.cat([target_clean_residual, target_baseline_residual], dim=1)
+            channel_weight = [self.lambda_cfm, self.lambda_cfm_baseline]
+            loss = loss + self._flow_matching_loss(
+                condition.detach(),
+                target_residual.detach(),
+                channel_weight=channel_weight,
+                valid_mask=valid_mask,
+            )
+            loss = loss + self._cfm_auxiliary_losses(
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                refined,
+                flow_hat,
+                clean_path,
+                baseline_path,
+                valid_mask=valid_mask,
+            )
+        return loss
+
+
 class GatedDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
     def __init__(self, config, block_cls=MambAttentionBlock):
         super().__init__(config, block_cls=block_cls)
@@ -446,3 +895,48 @@ class MambAttentionSTFrFTDualPathDAPPV2ECGDenoiser(ECGDenoisingModel):
             {"model": kwargs},
             block_cls=self.block_cls,
         )
+
+
+@register_model("mambattention_stfrft_dualpath_dapp_cfm_residual_ecg")
+class MambAttentionSTFrFTDualPathDAPPCFMResidualECGDenoiser(ECGDenoisingModel):
+    block_cls = MambAttentionBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = ResidualFlowDualPathDAPPMambAttentionCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
+
+    def load_state_dict(self, state_dict, strict=True):
+        result = super().load_state_dict(state_dict, strict=False)
+        if not strict:
+            return result
+
+        allowed_missing_prefixes = (
+            "core.residual_flow.",
+            "core.cfm_refine_gate_raw",
+            "core.cfm_baseline_gate_raw",
+            "core.cfm_consistency_blend_raw",
+            "core.cfm_adaptive_gate.",
+        )
+        allowed_unexpected_keys = {
+            "core.baseline_refine_gate_raw",
+        }
+        unexpected = [
+            key
+            for key in result.unexpected_keys
+            if key not in allowed_unexpected_keys
+        ]
+        missing = [
+            key
+            for key in result.missing_keys
+            if not key.startswith(allowed_missing_prefixes)
+        ]
+        if missing or unexpected:
+            raise RuntimeError(
+                "Error(s) in loading state_dict for "
+                f"{self.__class__.__name__}:\n"
+                + "\n".join([f"\tMissing key(s): {missing}", f"\tUnexpected key(s): {unexpected}"])
+            )
+        return result
