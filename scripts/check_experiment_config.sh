@@ -251,7 +251,6 @@ EXPECTED_BY_MODEL = {
         ("model", "mad_weight"): 1.0,
     },
     "descod_ecg_1shot": {
-        ("model", "dense_channel"): 64,
         ("model", "feats"): 80,
         ("model", "num_steps"): 50,
         ("model", "beta_start"): 1.0e-4,
@@ -263,7 +262,6 @@ EXPECTED_BY_MODEL = {
         ("model", "loss_fn"): "noise_l1",
     },
     "descod_ecg_5shot": {
-        ("model", "dense_channel"): 64,
         ("model", "feats"): 80,
         ("model", "num_steps"): 50,
         ("model", "beta_start"): 1.0e-4,
@@ -275,7 +273,6 @@ EXPECTED_BY_MODEL = {
         ("model", "loss_fn"): "noise_l1",
     },
     "descod_ecg_10shot": {
-        ("model", "dense_channel"): 64,
         ("model", "feats"): 80,
         ("model", "num_steps"): 50,
         ("model", "beta_start"): 1.0e-4,
@@ -377,6 +374,8 @@ for path in CONFIGS:
     model_name = data.get("model_name")
 
     for key_path, expected in EXPECTED.items():
+        if model_name in {"descod_ecg_1shot", "descod_ecg_5shot", "descod_ecg_10shot"} and key_path[0] == "model":
+            continue
         check_value(errors, data, key_path, expected, name)
 
     for key_path, expected in EXPECTED_BY_MODEL.get(model_name, {}).items():

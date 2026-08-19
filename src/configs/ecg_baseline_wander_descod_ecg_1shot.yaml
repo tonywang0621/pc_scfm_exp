@@ -66,20 +66,6 @@ dataset:
   eps: 1.0e-10
 
 model:
-  fea: "pha"
-  norm: False
-  dense_channel: 64
-  compress_factor: 0.3
-  num_tscblocks: 4
-  d_state: 16
-  d_conv: 4
-  expand: 4
-  norm_epsilon: 1.0e-5
-  sampling_rate: 250
-  n_fft: 64
-  hop_size: 8
-  win_size: 64
-  beta: 2
   feats: 80
   num_steps: 50
   beta_start: 1.0e-4

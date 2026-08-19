@@ -51,21 +51,22 @@ class FeatureWiseAffine(nn.Module):
 
 
 class HNFBlock(nn.Module):
-    def __init__(self, channels, dilation):
+    def __init__(self, input_size, hidden_size, dilation):
         super().__init__()
-        channels = int(channels)
+        input_size = int(input_size)
+        hidden_size = int(hidden_size)
         dilation = int(dilation)
         self.filters = nn.ModuleList(
             [
-                _KaimingConv1d(channels, channels // 4, 3, dilation=dilation, padding=dilation, padding_mode="reflect"),
-                _KaimingConv1d(channels, channels // 4, 5, dilation=dilation, padding=2 * dilation, padding_mode="reflect"),
-                _KaimingConv1d(channels, channels // 4, 9, dilation=dilation, padding=4 * dilation, padding_mode="reflect"),
-                _KaimingConv1d(channels, channels // 4, 15, dilation=dilation, padding=7 * dilation, padding_mode="reflect"),
+                _KaimingConv1d(input_size, hidden_size // 4, 3, dilation=dilation, padding=dilation, padding_mode="reflect"),
+                _KaimingConv1d(input_size, hidden_size // 4, 5, dilation=dilation, padding=2 * dilation, padding_mode="reflect"),
+                _KaimingConv1d(input_size, hidden_size // 4, 9, dilation=dilation, padding=4 * dilation, padding_mode="reflect"),
+                _KaimingConv1d(input_size, hidden_size // 4, 15, dilation=dilation, padding=7 * dilation, padding_mode="reflect"),
             ]
         )
-        self.conv_1 = _KaimingConv1d(channels, channels, 9, padding=4, padding_mode="reflect")
-        self.norm = nn.InstanceNorm1d(channels // 2)
-        self.conv_2 = _KaimingConv1d(channels, channels, 9, padding=4, padding_mode="reflect")
+        self.conv_1 = _KaimingConv1d(hidden_size, hidden_size, 9, padding=4, padding_mode="reflect")
+        self.norm = nn.InstanceNorm1d(hidden_size // 2)
+        self.conv_2 = _KaimingConv1d(hidden_size, hidden_size, 9, padding=4, padding_mode="reflect")
 
     def forward(self, x):
         residual = x
@@ -77,12 +78,13 @@ class HNFBlock(nn.Module):
 
 
 class Bridge(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, input_size, hidden_size):
         super().__init__()
-        channels = int(channels)
-        self.input_conv = _KaimingConv1d(channels, channels, 3, padding=1, padding_mode="reflect")
-        self.encoding = FeatureWiseAffine(channels, channels, use_affine_level=True)
-        self.output_conv = _KaimingConv1d(channels, channels, 3, padding=1, padding_mode="reflect")
+        input_size = int(input_size)
+        hidden_size = int(hidden_size)
+        self.input_conv = _KaimingConv1d(input_size, input_size, 3, padding=1, padding_mode="reflect")
+        self.encoding = FeatureWiseAffine(input_size, hidden_size, use_affine_level=True)
+        self.output_conv = _KaimingConv1d(input_size, hidden_size, 3, padding=1, padding_mode="reflect")
 
     def forward(self, x, noise_embed):
         x = self.input_conv(x)
@@ -94,31 +96,36 @@ class ConditionalScoreModel(nn.Module):
     def __init__(self, feats=80, dilations=(1, 2, 4, 2, 1)):
         super().__init__()
         feats = int(feats)
-        self.stream_x_stem = nn.Sequential(
-            _KaimingConv1d(1, feats, 9, padding=4, padding_mode="reflect"),
-            nn.LeakyReLU(0.2),
+        self.stream_x = nn.ModuleList(
+            [
+                nn.Sequential(
+                    _KaimingConv1d(1, feats, 9, padding=4, padding_mode="reflect"),
+                    nn.LeakyReLU(0.2),
+                ),
+                *[HNFBlock(feats, feats, dilation) for dilation in dilations],
+            ]
         )
-        self.stream_cond_stem = nn.Sequential(
-            _KaimingConv1d(1, feats, 9, padding=4, padding_mode="reflect"),
-            nn.LeakyReLU(0.2),
+        self.stream_cond = nn.ModuleList(
+            [
+                nn.Sequential(
+                    _KaimingConv1d(1, feats, 9, padding=4, padding_mode="reflect"),
+                    nn.LeakyReLU(0.2),
+                ),
+                *[HNFBlock(feats, feats, dilation) for dilation in dilations],
+            ]
         )
-        self.stream_x_blocks = nn.ModuleList([HNFBlock(feats, dilation) for dilation in dilations])
-        self.stream_cond_blocks = nn.ModuleList([HNFBlock(feats, dilation) for dilation in dilations])
         self.embed = NoiseLevelEmbedding(feats)
-        self.bridge = nn.ModuleList([Bridge(feats) for _ in dilations])
+        self.bridge = nn.ModuleList([Bridge(feats, feats) for _ in range(len(self.stream_x))])
         self.conv_out = _KaimingConv1d(feats, 1, 9, padding=4, padding_mode="reflect")
 
     def forward(self, x, condition, noise_scale):
         noise_embed = self.embed(noise_scale)
-        x = self.stream_x_stem(x)
-        condition = self.stream_cond_stem(condition)
-        for x_layer, condition_layer, bridge in zip(
-            self.stream_x_blocks,
-            self.stream_cond_blocks,
-            self.bridge,
-        ):
-            x = x_layer(x)
-            condition = condition_layer(condition) + bridge(x, noise_embed)
+        bridge_features = []
+        for layer, bridge in zip(self.stream_x, self.bridge):
+            x = layer(x)
+            bridge_features.append(bridge(x, noise_embed))
+        for bridge_feature, layer in zip(bridge_features, self.stream_cond):
+            condition = layer(condition) + bridge_feature
         return self.conv_out(condition)
 
 
@@ -232,7 +239,7 @@ class DeScoDDDPM(nn.Module):
             if valid_mask.ndim == 2:
                 valid_mask = valid_mask.unsqueeze(1)
             valid_mask = valid_mask.to(device=loss.device, dtype=loss.dtype)
-            return (loss * valid_mask).sum() / valid_mask.sum().clamp_min(1.0)
+            loss = loss * valid_mask
         if self.loss_reduction == "sum":
             return loss.sum()
         if self.loss_reduction == "mean":
