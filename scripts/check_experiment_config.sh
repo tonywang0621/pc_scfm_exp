@@ -363,12 +363,33 @@ EXPECTED_MAMBATTENTION_VARIANTS = {
     "ecg_baseline_wander_mambattention_stfrft_bag.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_lf_morph.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp.yaml": ("before_mamba", True, True),
+    "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_h4.yaml": ("before_mamba", True, True),
+    "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_h16.yaml": ("before_mamba", True, True),
+    "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_h32.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_v2.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_cfm_residual.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_eddm_distill.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_no_time_attention.yaml": ("before_mamba", False, True),
     "ecg_baseline_wander_mambattention_stfrft_no_freq_attention.yaml": ("before_mamba", True, False),
     "ecg_baseline_wander_mambattention_stfrft_no_attention.yaml": ("before_mamba", False, False),
+}
+
+DUALPATH_DAPP_HEAD_SWEEP_MODELS = {
+    "mambattention_stfrft_dualpath_dapp_h4_ecg": 4,
+    "mambattention_stfrft_dualpath_dapp_h16_ecg": 16,
+    "mambattention_stfrft_dualpath_dapp_h32_ecg": 32,
+}
+
+MAMBATTENTION_MODEL_NAMES = {
+    "mambattention_ecg",
+    "mambattention_stfrft_ecg",
+    "mambattention_stfrft_bag_ecg",
+    "mambattention_stfrft_lf_morph_ecg",
+    "mambattention_stfrft_dualpath_dapp_ecg",
+    "mambattention_stfrft_dualpath_dapp_v2_ecg",
+    "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg",
+    "mambattention_stfrft_eddm_distill_ecg",
+    *DUALPATH_DAPP_HEAD_SWEEP_MODELS.keys(),
 }
 
 EXPECTED_PCSCFM_VARIANTS = {
@@ -450,7 +471,14 @@ for path in CONFIGS:
     for key_path, expected in EXPECTED_BY_MODEL.get(model_name, {}).items():
         check_value(errors, data, key_path, expected, name)
 
-    if model_name in {"mambattention_ecg", "mambattention_stfrft_ecg", "mambattention_stfrft_bag_ecg", "mambattention_stfrft_lf_morph_ecg", "mambattention_stfrft_dualpath_dapp_ecg", "mambattention_stfrft_dualpath_dapp_v2_ecg", "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg", "mambattention_stfrft_eddm_distill_ecg"}:
+    if model_name in DUALPATH_DAPP_HEAD_SWEEP_MODELS:
+        base_expectations = EXPECTED_BY_MODEL["mambattention_stfrft_dualpath_dapp_ecg"]
+        for key_path, expected in base_expectations.items():
+            if key_path == ("model", "attention_heads"):
+                expected = DUALPATH_DAPP_HEAD_SWEEP_MODELS[model_name]
+            check_value(errors, data, key_path, expected, name)
+
+    if model_name in MAMBATTENTION_MODEL_NAMES:
         expected_variant = EXPECTED_MAMBATTENTION_VARIANTS.get(name)
         if expected_variant is None:
             errors.append(f"{name}: unknown MambAttention variant config name.")

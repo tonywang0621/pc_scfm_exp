@@ -887,6 +887,21 @@ class MambAttentionSTFrFTDualPathDAPPECGDenoiser(ECGDenoisingModel):
         )
 
 
+@register_model("mambattention_stfrft_dualpath_dapp_h4_ecg")
+class MambAttentionSTFrFTDualPathDAPPH4ECGDenoiser(MambAttentionSTFrFTDualPathDAPPECGDenoiser):
+    pass
+
+
+@register_model("mambattention_stfrft_dualpath_dapp_h16_ecg")
+class MambAttentionSTFrFTDualPathDAPPH16ECGDenoiser(MambAttentionSTFrFTDualPathDAPPECGDenoiser):
+    pass
+
+
+@register_model("mambattention_stfrft_dualpath_dapp_h32_ecg")
+class MambAttentionSTFrFTDualPathDAPPH32ECGDenoiser(MambAttentionSTFrFTDualPathDAPPECGDenoiser):
+    pass
+
+
 @register_model("mambattention_stfrft_dualpath_dapp_v2_ecg")
 class MambAttentionSTFrFTDualPathDAPPV2ECGDenoiser(ECGDenoisingModel):
     block_cls = MambAttentionBlock
