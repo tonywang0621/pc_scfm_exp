@@ -10,7 +10,7 @@ from utils import (
     setup_logger,
     plot_loss_curves,
     plot_prediction_results,
-    get_reconstruction_metrics,
+    get_reconstruction_metric_summary,
     reconstruction_metrics_from_arrays,
     profile_model_complexity,
 )
@@ -606,20 +606,23 @@ def train():
                 logger.info(f"Saved prediction plot to {prediction_path}")
 
         for eval_name, _, eval_loader in eval_items:
-            metrics_dict = get_reconstruction_metrics(
+            metrics_summary = get_reconstruction_metric_summary(
                 model, eval_loader, device, fs=fs, low_freq_hz=low_freq_hz, eps=args.dataset.eps
             )
             logger.info('\n')
             logger.info(separator)
             logger.info(f"{ckpt_name} | {eval_name}")
-            logger.info(f"{'Metric':>24} | {'Value':>12}")
+            logger.info(f"{'Metric':>24} | {'Mean':>12} | {'Std':>12} | {'Count':>8}")
             logger.info(separator)
-            for key, value in metrics_dict.items():
+            for key, stats in metrics_summary.items():
                 display_name = metric_display_map.get(key, key)
-                logger.info(f"{display_name:>24} | {value:>12.4f}")
+                logger.info(
+                    f"{display_name:>24} | {stats['mean']:>12.4f} | "
+                    f"{stats['std']:>12.4f} | {stats['count']:>8}"
+                )
             logger.info(separator + "\n")
             with open(eval_dir / f"metrics_{eval_name}.yaml", "w", encoding="utf-8") as f:
-                yaml.safe_dump(metrics_dict, f, sort_keys=False)
+                yaml.safe_dump(metrics_summary, f, sort_keys=False)
 
         complexity_path = eval_dir / "complexity_summary.yaml"
         complexity = profile_model_complexity(

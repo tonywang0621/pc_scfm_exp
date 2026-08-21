@@ -43,7 +43,10 @@ def parse_args():
 def add_generation_args(parser):
     parser.add_argument("--config", default="configs/ecg_baseline_wander_mecg_e.yaml")
     parser.add_argument("--input-dir", required=True)
-    parser.add_argument("--metadata-csv", required=True)
+    parser.add_argument("--metadata-csv", default=None)
+    parser.add_argument("--dataset-name", default="ptbxl")
+    parser.add_argument("--dataset-label", default=None)
+    parser.add_argument("--split-name", default="test")
     parser.add_argument("--noise-dir", default=None)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--source-fs", type=float, default=None)
@@ -92,10 +95,8 @@ def run_preprocess(args, output_dir, baseline_kind, alpha_values, frequencies_hz
         args.config,
         "--input-dir",
         args.input_dir,
-        "--metadata-csv",
-        args.metadata_csv,
         "--dataset-name",
-        "ptbxl",
+        args.dataset_name,
         "--output-dir",
         output_dir,
         "--baseline-kind",
@@ -103,10 +104,12 @@ def run_preprocess(args, output_dir, baseline_kind, alpha_values, frequencies_hz
         "--alpha-values",
         alpha_values,
         "--splits",
-        "test",
+        args.split_name,
         "--seed",
         args.seed,
     ]
+    if args.metadata_csv:
+        cmd.extend(["--metadata-csv", args.metadata_csv])
     if args.noise_dir:
         cmd.extend(["--noise-dir", args.noise_dir])
     if args.source_fs is not None:
@@ -150,7 +153,7 @@ def read_metrics_summary(path):
 
 def write_sweep_summary(path, sweep_rows):
     metrics = sorted({metric for row in sweep_rows for metric in row["metrics"]})
-    fieldnames = ["experiment", "condition_name", "condition_value"]
+    fieldnames = ["experiment", "dataset", "condition_name", "condition_value"]
     for metric in metrics:
         fieldnames.extend([f"{metric}_mean", f"{metric}_std", f"{metric}_count"])
 
@@ -160,6 +163,7 @@ def write_sweep_summary(path, sweep_rows):
         for row in sweep_rows:
             out = {
                 "experiment": row["experiment"],
+                "dataset": row.get("dataset", ""),
                 "condition_name": row["condition_name"],
                 "condition_value": row["condition_value"],
             }
@@ -175,26 +179,28 @@ def run_exp2_strength(args):
     default_alphas = cfg["dataset"]["baseline_wander"].get("alpha_values", [0.05, 0.1, 0.2, 0.3, 0.5])
     alphas = comma_values(args.alpha_values, default_alphas)
     root = Path(args.output_root)
+    dataset_label = args.dataset_label or args.dataset_name
     summary_rows = []
 
     for alpha in alphas:
         condition = f"alpha_{label_number(alpha)}"
-        condition_dir = root / "exp2_strength" / condition
+        condition_dir = root / "exp2_strength" / dataset_label / condition
         processed_dir = condition_dir / "processed"
         inference_dir = condition_dir / "inference"
         run_preprocess(args, processed_dir, args.baseline_kind, alpha)
-        run_inference(args, processed_dir / "test.npz", inference_dir)
+        run_inference(args, processed_dir / f"{args.split_name}.npz", inference_dir)
         metrics = read_metrics_summary(inference_dir / "metrics_summary.csv")
         summary_rows.append(
             {
                 "experiment": "Experiment 2 - Baseline Strength",
+                "dataset": dataset_label,
                 "condition_name": "alpha",
                 "condition_value": alpha,
                 "metrics": metrics,
             }
         )
 
-    write_sweep_summary(root / "exp2_strength" / "summary.csv", summary_rows)
+    write_sweep_summary(root / "exp2_strength" / dataset_label / "summary.csv", summary_rows)
 
 
 def run_exp3_frequency(args):
@@ -204,26 +210,28 @@ def run_exp3_frequency(args):
     )
     freqs = comma_values(args.frequencies_hz, default_freqs)
     root = Path(args.output_root)
+    dataset_label = args.dataset_label or args.dataset_name
     summary_rows = []
 
     for freq in freqs:
         condition = f"freq_{label_number(freq)}hz"
-        condition_dir = root / "exp3_frequency" / condition
+        condition_dir = root / "exp3_frequency" / dataset_label / condition
         processed_dir = condition_dir / "processed"
         inference_dir = condition_dir / "inference"
         run_preprocess(args, processed_dir, args.baseline_kind, args.alpha_value, frequencies_hz=freq)
-        run_inference(args, processed_dir / "test.npz", inference_dir)
+        run_inference(args, processed_dir / f"{args.split_name}.npz", inference_dir)
         metrics = read_metrics_summary(inference_dir / "metrics_summary.csv")
         summary_rows.append(
             {
                 "experiment": "Experiment 3 - Baseline Frequency",
+                "dataset": dataset_label,
                 "condition_name": "frequency_hz",
                 "condition_value": freq,
                 "metrics": metrics,
             }
         )
 
-    write_sweep_summary(root / "exp3_frequency" / "summary.csv", summary_rows)
+    write_sweep_summary(root / "exp3_frequency" / dataset_label / "summary.csv", summary_rows)
 
 
 def ablation_variants(base_cfg, output_root):

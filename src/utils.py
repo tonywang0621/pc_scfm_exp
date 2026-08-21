@@ -92,25 +92,38 @@ def plot_loss_curves(train_losses, val_losses, eval_every, results_dir, val_pccs
 
 
 def reconstruction_metrics_from_arrays(noisy, clean, pred, fs=250, low_freq_hz=0.5, eps=1e-10):
+    summary = reconstruction_metric_summary_from_arrays(noisy, clean, pred, fs=fs, low_freq_hz=low_freq_hz, eps=eps)
+    return {key: stats["mean"] for key, stats in summary.items()}
+
+
+def reconstruction_metric_summary_from_arrays(noisy, clean, pred, fs=250, low_freq_hz=0.5, eps=1e-10):
     noisy = np.squeeze(np.asarray(noisy), axis=1)
     clean = np.squeeze(np.asarray(clean), axis=1)
     pred = np.squeeze(np.asarray(pred), axis=1)
-    return {
-        "SSD": float(np.mean(ssd(clean, pred))),
-        "MAD": float(np.mean(maximum_absolute_distance(clean, pred))),
-        "PRD": float(np.mean(prd(clean, pred, eps=eps))),
-        "CosSim": float(np.mean(cosine_similarity(clean, pred, eps=eps))),
-        "Output_SNR_dB": float(np.mean(snr_db(clean, pred, eps=eps))),
-        "SNR_Improvement_dB": float(np.mean(snr_improvement_db(clean, noisy, pred, eps=eps))),
-        "LF_Reduction_dB": float(
-            np.mean(low_frequency_power_reduction(noisy, pred, fs=fs, high_hz=low_freq_hz, eps=eps))
-        ),
-        "R_Peak_Timing_Error_ms": nanmean_or_nan(r_peak_timing_error_ms(clean, pred, fs=fs)),
-        "RR_Interval_MAE_ms": nanmean_or_nan(rr_interval_mae_ms(clean, pred, fs=fs)),
-        "RMSE": float(np.sqrt(np.mean((clean - pred) ** 2))),
-        "Centered_CosSim": float(np.mean(centered_cosine_similarity(clean, pred, eps=eps))),
-        "QRS_Amplitude_Error": nanmean_or_nan(qrs_amplitude_error(clean, pred, fs=fs)),
+    metric_values = {
+        "SSD": ssd(clean, pred),
+        "MAD": maximum_absolute_distance(clean, pred),
+        "PRD": prd(clean, pred, eps=eps),
+        "CosSim": cosine_similarity(clean, pred, eps=eps),
+        "Output_SNR_dB": snr_db(clean, pred, eps=eps),
+        "SNR_Improvement_dB": snr_improvement_db(clean, noisy, pred, eps=eps),
+        "LF_Reduction_dB": low_frequency_power_reduction(noisy, pred, fs=fs, high_hz=low_freq_hz, eps=eps),
+        "R_Peak_Timing_Error_ms": r_peak_timing_error_ms(clean, pred, fs=fs),
+        "RR_Interval_MAE_ms": rr_interval_mae_ms(clean, pred, fs=fs),
+        "RMSE": np.sqrt(np.mean((clean - pred) ** 2, axis=-1)),
+        "Centered_CosSim": centered_cosine_similarity(clean, pred, eps=eps),
+        "QRS_Amplitude_Error": qrs_amplitude_error(clean, pred, fs=fs),
     }
+    summary = {}
+    for key, values in metric_values.items():
+        values = np.asarray(values, dtype=np.float64)
+        valid = values[~np.isnan(values)]
+        summary[key] = {
+            "mean": nanmean_or_nan(values),
+            "std": float(np.std(valid)) if valid.size else float("nan"),
+            "count": int(valid.size),
+        }
+    return summary
 
 
 def plot_prediction_results(
@@ -244,6 +257,13 @@ def _plot_spectral_diagnostics(noisy, clean, restored, fs, output_path):
 
 
 def get_reconstruction_metrics(model, test_loader, device, fs=250, low_freq_hz=0.5, eps=1e-10):
+    summary = get_reconstruction_metric_summary(
+        model, test_loader, device, fs=fs, low_freq_hz=low_freq_hz, eps=eps
+    )
+    return {key: stats["mean"] for key, stats in summary.items()}
+
+
+def get_reconstruction_metric_summary(model, test_loader, device, fs=250, low_freq_hz=0.5, eps=1e-10):
     noisy_all, clean_all, pred_all = [], [], []
     model.eval()
     with torch.no_grad():
@@ -254,7 +274,7 @@ def get_reconstruction_metrics(model, test_loader, device, fs=250, low_freq_hz=0
             clean_all.append(clean.detach().cpu().numpy())
             pred_all.append(pred.detach().cpu().numpy())
 
-    return reconstruction_metrics_from_arrays(
+    return reconstruction_metric_summary_from_arrays(
         np.concatenate(noisy_all, axis=0),
         np.concatenate(clean_all, axis=0),
         np.concatenate(pred_all, axis=0),
