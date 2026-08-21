@@ -623,7 +623,7 @@ python result_analysis.py paired-stats \
 
 ```yaml
 training:
-  train_epochs: 30
+  train_epochs: 50000
   batch_size: 96
   lr: 1.0e-4
   optimizer: AdamW
@@ -633,7 +633,7 @@ training:
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 5
-  early_stopping_patience_epochs: 8
+  early_stopping_patience_epochs: 15
   early_stopping_min_delta: 1.0e-4
 ```
 
