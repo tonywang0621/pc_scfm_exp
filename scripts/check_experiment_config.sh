@@ -246,6 +246,59 @@ EXPECTED_BY_MODEL = {
         ("model", "lambda_cfm_residual_smooth"): 0.005,
         ("model", "lambda_cfm_clean_baseline_consistency"): 0.05,
     },
+    "mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg": {
+        ("model", "dense_channel"): 64,
+        ("model", "attention_heads"): 8,
+        ("model", "attention_dropout"): 0.0,
+        ("model", "loss_fn"): "time+mse+com+con+dual_noise+lf+morph+cfm+noise_aux",
+        ("model", "lambda_mse"): 0.45,
+        ("model", "lambda_dual_baseline"): 0.30,
+        ("model", "lambda_dual_residual"): 0.06,
+        ("model", "lambda_lf"): 0.05,
+        ("model", "lambda_morph"): 0.08,
+        ("model", "time_frequency_transform"): "stfrft",
+        ("model", "learnable_frft_order"): True,
+        ("model", "frft_order_init"): 0.9,
+        ("model", "frft_order_min"): 0.05,
+        ("model", "frft_order_max"): 1.95,
+        ("model", "use_dapp"): True,
+        ("model", "dapp_time_scales"): [3, 5, 9, 15],
+        ("model", "dapp_freq_scales"): [1, 3],
+        ("model", "dual_noise_head_hidden"): 64,
+        ("model", "residual_refine_scale"): 0.5,
+        ("model", "baseline_kernel_size"): 129,
+        ("model", "cfm_channels"): 64,
+        ("model", "cfm_blocks"): 6,
+        ("model", "cfm_time_dim"): 128,
+        ("model", "cfm_inference_steps"): 3,
+        ("model", "cfm_use_adaptive_gate"): True,
+        ("model", "cfm_gate_hidden"): 64,
+        ("model", "cfm_clean_delta_budget"): 0.30,
+        ("model", "cfm_baseline_delta_budget"): 1.20,
+        ("model", "cfm_project_baseline_delta"): True,
+        ("model", "cfm_clean_lowpass_keep"): 0.25,
+        ("model", "cfm_baseline_gate_init"): 0.22,
+        ("model", "cfm_baseline_gate_max"): 0.85,
+        ("model", "cfm_consistency_blend_init"): 0.30,
+        ("model", "cfm_consistency_blend_max"): 0.65,
+        ("model", "lambda_cfm"): 0.10,
+        ("model", "lambda_cfm_baseline"): 0.40,
+        ("model", "lambda_cfm_recon"): 0.30,
+        ("model", "lambda_cfm_stft"): 0.03,
+        ("model", "lambda_cfm_lf"): 0.05,
+        ("model", "lambda_cfm_deriv"): 0.07,
+        ("model", "lambda_cfm_residual_smooth"): 0.015,
+        ("model", "lambda_cfm_clean_baseline_consistency"): 0.10,
+        ("model", "cfm_unet_base_channels"): 64,
+        ("model", "cfm_unet_channel_mults"): [1, 2, 4],
+        ("model", "cfm_unet_time_dim"): 192,
+        ("model", "cfm_unet_pool_scales"): [3, 5, 9, 15],
+        ("model", "cfm_unet_attention_heads"): 4,
+        ("model", "cfm_unet_aux_channels"): 2,
+        ("model", "lambda_ecg_noise_aux"): 0.35,
+        ("model", "lambda_gaussian_noise_aux"): 0.10,
+        ("model", "gaussian_aux_scale"): 0.2,
+    },
     "pc_scfm": {
         ("model", "dense_channel"): 64,
         ("model", "attention_heads"): 8,
@@ -368,6 +421,7 @@ EXPECTED_MAMBATTENTION_VARIANTS = {
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_h32.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_v2.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_cfm_residual.yaml": ("before_mamba", True, True),
+    "ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_cfm_unet_bd.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_eddm_distill.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_stfrft_no_time_attention.yaml": ("before_mamba", False, True),
     "ecg_baseline_wander_mambattention_stfrft_no_freq_attention.yaml": ("before_mamba", True, False),
@@ -388,6 +442,7 @@ MAMBATTENTION_MODEL_NAMES = {
     "mambattention_stfrft_dualpath_dapp_ecg",
     "mambattention_stfrft_dualpath_dapp_v2_ecg",
     "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg",
+    "mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg",
     "mambattention_stfrft_eddm_distill_ecg",
     *DUALPATH_DAPP_HEAD_SWEEP_MODELS.keys(),
 }
@@ -499,13 +554,16 @@ for path in CONFIGS:
                 else:
                     check_value(errors, data, key_path, expected, name)
 
-    if model_name == "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg":
+    if model_name in {
+        "mambattention_stfrft_dualpath_dapp_cfm_residual_ecg",
+        "mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg",
+    }:
         loss_tokens = set(str(get_value(data, ("model", "loss_fn"))).split("+"))
         forbidden_tokens = {"teacher", "distill", "prd", "cos", "max"}
         overlap = sorted(loss_tokens & forbidden_tokens)
         if overlap:
             errors.append(
-                f"{name}: CFM residual model must not use evaluation-metric or EDDM teacher loss tokens: {overlap}"
+                f"{name}: CFM model must not use evaluation-metric or EDDM teacher loss tokens: {overlap}"
             )
             loss_terms = set(str(get_value(data, ("model", "loss_fn"))).split("+"))
             uses_flow = get_value(data, ("model", "use_flow_proposal"))

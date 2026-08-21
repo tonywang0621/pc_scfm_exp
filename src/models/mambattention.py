@@ -410,6 +410,200 @@ class CFMAdaptiveGate(nn.Module):
         return clean_gate, baseline_gate, blend
 
 
+class UNetDAPP1d(nn.Module):
+    def __init__(self, channels, pool_scales=(3, 5, 9, 15), use_global_pool=True):
+        super().__init__()
+        self.pool_scales = tuple(int(scale) for scale in pool_scales)
+        self.use_global_pool = bool(use_global_pool)
+        self.projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.AdaptiveAvgPool1d(scale),
+                    nn.Conv1d(channels, channels, 1),
+                    nn.SiLU(),
+                )
+                for scale in self.pool_scales
+            ]
+        )
+        self.global_projection = (
+            nn.Sequential(
+                nn.AdaptiveAvgPool1d(1),
+                nn.Conv1d(channels, channels, 1),
+                nn.SiLU(),
+            )
+            if self.use_global_pool
+            else None
+        )
+        feature_count = 1 + len(self.pool_scales) + int(self.use_global_pool)
+        self.fuse = nn.Sequential(
+            nn.Conv1d(channels * feature_count, channels, 1),
+            nn.GroupNorm(1, channels),
+            nn.SiLU(),
+            nn.Conv1d(channels, channels, 3, padding=1),
+        )
+
+    def forward(self, x):
+        length = x.shape[-1]
+        features = [x]
+        for projection in self.projections:
+            pooled = projection(x)
+            features.append(F.interpolate(pooled, size=length, mode="linear", align_corners=False))
+        if self.global_projection is not None:
+            pooled = self.global_projection(x)
+            features.append(F.interpolate(pooled, size=length, mode="linear", align_corners=False))
+        return self.fuse(torch.cat(features, dim=1)) + x
+
+
+class UNetConvBlock1d(nn.Module):
+    def __init__(self, in_channels, out_channels, time_dim, groups=8, dropout=0.0):
+        super().__init__()
+        group_count = min(int(groups), int(out_channels))
+        while out_channels % group_count != 0:
+            group_count -= 1
+        self.conv1 = nn.Conv1d(in_channels, out_channels, 3, padding=1)
+        self.norm1 = nn.GroupNorm(group_count, out_channels)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, 3, padding=1)
+        self.norm2 = nn.GroupNorm(group_count, out_channels)
+        self.time_proj = nn.Linear(time_dim, out_channels)
+        self.dropout = nn.Dropout(dropout)
+        self.skip = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x, time_emb):
+        residual = self.skip(x)
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = F.silu(x + self.time_proj(time_emb).unsqueeze(-1))
+        x = self.dropout(x)
+        x = self.conv2(x)
+        x = self.norm2(x)
+        return F.silu(x + residual)
+
+
+class UNetDownBlock1d(nn.Module):
+    def __init__(self, in_channels, out_channels, time_dim, groups=8, dropout=0.0):
+        super().__init__()
+        self.block = UNetConvBlock1d(in_channels, out_channels, time_dim, groups=groups, dropout=dropout)
+        self.pool = nn.Conv1d(out_channels, out_channels, 4, stride=2, padding=1)
+
+    def forward(self, x, time_emb):
+        skip = self.block(x, time_emb)
+        return self.pool(skip), skip
+
+
+class UNetUpBlock1d(nn.Module):
+    def __init__(self, in_channels, skip_channels, out_channels, time_dim, groups=8, dropout=0.0):
+        super().__init__()
+        self.up = nn.ConvTranspose1d(in_channels, out_channels, 4, stride=2, padding=1)
+        self.block = UNetConvBlock1d(
+            out_channels + skip_channels,
+            out_channels,
+            time_dim,
+            groups=groups,
+            dropout=dropout,
+        )
+
+    def forward(self, x, skip, time_emb):
+        x = self.up(x)
+        if x.shape[-1] != skip.shape[-1]:
+            x = F.interpolate(x, size=skip.shape[-1], mode="linear", align_corners=False)
+        return self.block(torch.cat([x, skip], dim=1), time_emb)
+
+
+class UNetSelfAttention1d(nn.Module):
+    def __init__(self, channels, heads=4):
+        super().__init__()
+        self.norm = nn.GroupNorm(1, channels)
+        self.attn = nn.MultiheadAttention(int(channels), int(heads), batch_first=True)
+
+    def forward(self, x):
+        residual = x
+        sequence = self.norm(x).transpose(1, 2)
+        attended, _ = self.attn(sequence, sequence, sequence, need_weights=False)
+        return residual + attended.transpose(1, 2)
+
+
+class ConditionalResidualFlowUNetRefiner1d(nn.Module):
+    def __init__(
+        self,
+        condition_channels=6,
+        state_channels=2,
+        output_channels=2,
+        base_channels=64,
+        channel_mults=(1, 2, 4),
+        time_dim=192,
+        groups=8,
+        dropout=0.0,
+        pool_scales=(3, 5, 9, 15),
+        attention_heads=4,
+        aux_output_channels=0,
+    ):
+        super().__init__()
+        self.output_channels = int(output_channels)
+        self.aux_output_channels = int(aux_output_channels)
+        self.time_embedding = nn.Sequential(
+            ResidualFlowTimeEmbedding(time_dim),
+            nn.Linear(time_dim, time_dim),
+            nn.SiLU(),
+            nn.Linear(time_dim, time_dim),
+        )
+        channels = [int(base_channels) * int(mult) for mult in channel_mults]
+        self.input = nn.Conv1d(condition_channels + state_channels, channels[0], 3, padding=1)
+        self.downs = nn.ModuleList()
+        in_channels = channels[0]
+        for out_channels in channels:
+            self.downs.append(
+                UNetDownBlock1d(
+                    in_channels,
+                    out_channels,
+                    time_dim,
+                    groups=groups,
+                    dropout=dropout,
+                )
+            )
+            in_channels = out_channels
+        self.first_skip_dapp = UNetDAPP1d(channels[0], pool_scales=pool_scales, use_global_pool=True)
+        self.mid_block1 = UNetConvBlock1d(channels[-1], channels[-1], time_dim, groups=groups, dropout=dropout)
+        self.mid_attention = UNetSelfAttention1d(channels[-1], heads=attention_heads)
+        self.mid_block2 = UNetConvBlock1d(channels[-1], channels[-1], time_dim, groups=groups, dropout=dropout)
+        self.ups = nn.ModuleList()
+        current = channels[-1]
+        for skip_channels in reversed(channels):
+            self.ups.append(
+                UNetUpBlock1d(
+                    current,
+                    skip_channels,
+                    skip_channels,
+                    time_dim,
+                    groups=groups,
+                    dropout=dropout,
+                )
+            )
+            current = skip_channels
+        self.output = nn.Sequential(
+            nn.GroupNorm(1, channels[0]),
+            nn.SiLU(),
+            nn.Conv1d(channels[0], self.output_channels + self.aux_output_channels, 3, padding=1),
+        )
+
+    def forward(self, residual_state, condition, t):
+        if t.ndim == 0:
+            t = t.expand(residual_state.shape[0])
+        time_emb = self.time_embedding(t)
+        x = self.input(torch.cat([residual_state, condition], dim=1))
+        skips = []
+        for index, down in enumerate(self.downs):
+            x, skip = down(x, time_emb)
+            if index == 0:
+                skip = self.first_skip_dapp(skip)
+            skips.append(skip)
+        x = self.mid_block1(x, time_emb)
+        x = self.mid_attention(x)
+        x = self.mid_block2(x, time_emb)
+        for up, skip in zip(self.ups, reversed(skips)):
+            x = up(x, skip, time_emb)
+        return self.output(x)
+
+
 class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
     def __init__(self, config, block_cls=MambAttentionBlock):
         super().__init__(config, block_cls=block_cls)
@@ -717,6 +911,143 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
         return loss
 
 
+class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMambAttentionCore):
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        h = self.h
+        self.cfm_unet_aux_channels = int(h.get("cfm_unet_aux_channels", 2))
+        self.lambda_ecg_noise_aux = float(h.get("lambda_ecg_noise_aux", 0.35))
+        self.lambda_gaussian_noise_aux = float(h.get("lambda_gaussian_noise_aux", 0.10))
+        self.gaussian_aux_scale = float(h.get("gaussian_aux_scale", 0.2))
+        self.residual_flow = ConditionalResidualFlowUNetRefiner1d(
+            condition_channels=self.cfm_condition_channels,
+            state_channels=2,
+            output_channels=2,
+            base_channels=int(h.get("cfm_unet_base_channels", 64)),
+            channel_mults=tuple(h.get("cfm_unet_channel_mults", [1, 2, 4])),
+            time_dim=int(h.get("cfm_unet_time_dim", 192)),
+            groups=int(h.get("cfm_groups", 8)),
+            dropout=float(h.get("cfm_dropout", 0.0)),
+            pool_scales=tuple(h.get("cfm_unet_pool_scales", [3, 5, 9, 15])),
+            attention_heads=int(h.get("cfm_unet_attention_heads", 4)),
+            aux_output_channels=self.cfm_unet_aux_channels,
+        )
+
+    def _split_unet_output(self, output):
+        velocity = output[:, :2]
+        auxiliary = output[:, 2:] if output.shape[1] > 2 else None
+        return velocity, auxiliary
+
+    def _flow_matching_loss(self, condition, target_residual, channel_weight=1.0, valid_mask=None):
+        start = self._sample_flow_start(target_residual)
+        t = torch.rand((target_residual.shape[0],), device=target_residual.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_residual)
+        residual_state = (1.0 - t_view) * start + t_view * target_residual + bridge_noise
+        target_velocity = target_residual - start
+        predicted_velocity, _ = self._split_unet_output(self.residual_flow(residual_state, condition, t))
+        loss = F.mse_loss(predicted_velocity, target_velocity, reduction="none")
+        weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
+        return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
+
+    def _integrate_residual_flow(self, condition, steps=None):
+        steps = int(steps or self.cfm_inference_steps)
+        steps = max(steps, 1)
+        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        dt = 1.0 / steps
+        for step in range(steps):
+            t_value = (step + 0.5) / steps
+            t = torch.full((condition.shape[0],), t_value, device=condition.device, dtype=condition.dtype)
+            velocity, _ = self._split_unet_output(self.residual_flow(residual, condition, t))
+            residual = residual + dt * velocity
+        return residual
+
+    def _noise_auxiliary_loss(self, condition, clean_audio, noisy_audio, base_restored, valid_mask=None):
+        if self.cfm_unet_aux_channels < 2 or self.lambda_ecg_noise_aux + self.lambda_gaussian_noise_aux <= 0:
+            return clean_audio.new_tensor(0.0)
+        true_baseline = noisy_audio - clean_audio.unsqueeze(1)
+        gaussian_noise = torch.randn_like(true_baseline)
+        t = torch.rand((true_baseline.shape[0],), device=true_baseline.device)
+        t_view = t.view(-1, 1, 1)
+        sigma = self.gaussian_aux_scale * torch.sqrt((t_view * (1.0 - t_view)).clamp_min(1.0e-8))
+        xt = clean_audio.unsqueeze(1) + t_view * true_baseline + sigma * gaussian_noise
+        aux_state = torch.cat([xt - base_restored.detach(), noisy_audio - xt], dim=1)
+        _, auxiliary = self._split_unet_output(self.residual_flow(aux_state, condition.detach(), t))
+        if auxiliary is None or auxiliary.shape[1] < 2:
+            return clean_audio.new_tensor(0.0)
+        baseline_loss = F.mse_loss(auxiliary[:, 0:1], true_baseline.detach(), reduction="none")
+        gaussian_loss = F.mse_loss(auxiliary[:, 1:2], gaussian_noise.detach(), reduction="none")
+        loss = clean_audio.new_tensor(0.0)
+        if self.lambda_ecg_noise_aux > 0:
+            loss = loss + self.lambda_ecg_noise_aux * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+        if self.lambda_gaussian_noise_aux > 0:
+            loss = loss + self.lambda_gaussian_noise_aux * self._masked_mean(gaussian_loss.squeeze(1), valid_mask)
+        return loss
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        refined, flow_hat, condition, clean_path, baseline_path = self._refine_from_base(
+            noisy_audio,
+            base_restored,
+            baseline_hat=baseline_hat,
+        )
+        refined_audio = refined.squeeze(1)
+        direct_restored = direct_restored.squeeze(1)
+
+        loss = self._ecg_loss(
+            clean_audio,
+            refined_audio,
+            norm_factor,
+            predicted_com=com_g,
+            valid_mask=valid_mask,
+        )
+        if "dual" in self.loss_fn or "dual_noise" in self.loss_fn:
+            baseline_target = noisy_audio - clean_audio.unsqueeze(1)
+            residual_target = clean_audio.unsqueeze(1) - direct_restored.unsqueeze(1)
+            baseline_loss = F.mse_loss(baseline_hat, baseline_target, reduction="none")
+            residual_loss = F.mse_loss(residual_delta_hat, residual_target, reduction="none")
+            loss = loss + self.lambda_dual_baseline * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+            loss = loss + self.lambda_dual_residual * self._masked_mean(residual_loss.squeeze(1), valid_mask)
+        if "cfm" in self.loss_fn or "flow_matching" in self.loss_fn:
+            estimated_baseline = noisy_audio - base_restored.detach()
+            true_baseline = noisy_audio - clean_audio.unsqueeze(1)
+            target_clean_residual = clean_audio.unsqueeze(1) - base_restored.detach()
+            target_baseline_residual = true_baseline - estimated_baseline
+            target_residual = torch.cat([target_clean_residual, target_baseline_residual], dim=1)
+            channel_weight = [self.lambda_cfm, self.lambda_cfm_baseline]
+            loss = loss + self._flow_matching_loss(
+                condition.detach(),
+                target_residual.detach(),
+                channel_weight=channel_weight,
+                valid_mask=valid_mask,
+            )
+            loss = loss + self._cfm_auxiliary_losses(
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                refined,
+                flow_hat,
+                clean_path,
+                baseline_path,
+                valid_mask=valid_mask,
+            )
+        if "noise_aux" in self.loss_fn:
+            loss = loss + self._noise_auxiliary_loss(
+                condition,
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                valid_mask=valid_mask,
+            )
+        return loss
+
+
 class GatedDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
     def __init__(self, config, block_cls=MambAttentionBlock):
         super().__init__(config, block_cls=block_cls)
@@ -957,3 +1288,15 @@ class MambAttentionSTFrFTDualPathDAPPCFMResidualECGDenoiser(ECGDenoisingModel):
                 + "\n".join([f"\tMissing key(s): {missing}", f"\tUnexpected key(s): {unexpected}"])
             )
         return result
+
+
+@register_model("mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg")
+class MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser(ECGDenoisingModel):
+    block_cls = MambAttentionBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = UNetResidualFlowDualPathDAPPMambAttentionCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
