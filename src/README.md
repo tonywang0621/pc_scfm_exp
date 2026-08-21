@@ -623,26 +623,30 @@ python result_analysis.py paired-stats \
 
 ```yaml
 training:
-  batch_size: 32
-  train_iterations: 20000
-  eval_every: 100
-  validation_metrics_every: 500
-  save_every: 5000
+  train_epochs: 30
+  batch_size: 96
   lr: 1.0e-4
-  early_stopping_patience: 25
+  optimizer: AdamW
+  betas: [0.8, 0.99]
+  scheduler: ExponentialLR
+  gamma: 0.99
+  eval_every_epochs: 1
+  validation_metrics_every_epochs: 1
+  save_every_epochs: 5
+  early_stopping_patience_epochs: 8
   early_stopping_min_delta: 1.0e-4
 ```
 
-Early stopping 只由 validation PCC 控制；每 100 iterations 用 PTB-XL fold 9 計算 validation PCC。Validation loss 只保存輔助 `best_model.pt`，不重置 patience。訓練時第一次 validation 與之後每 500 iterations 會在 `checkpoint/<exp_name>/<model_name>/validation_metrics.yaml` 記錄 validation loss、PRD、SNR improvement、low-frequency reduction、R-peak timing error 與 RR interval MAE 作為 sanity check。
+Early stopping 只由 validation PCC 控制；每 1 epoch 用 PTB-XL fold 9 計算 validation PCC。Validation loss 只保存輔助 `best_model.pt`，不重置 patience。訓練時每 1 epoch 會在 `checkpoint/<exp_name>/<model_name>/validation_metrics.yaml` 記錄 validation loss、PRD、SNR improvement、low-frequency reduction、R-peak timing error 與 RR interval MAE 作為 sanity check。
 
 命令列範例：
 
 ```bash
 python train_supervised.py \
   --config configs/ecg_baseline_wander_mecg_e.yaml \
-  training.batch_size=16 \
+  training.batch_size=32 \
   training.lr=5e-5 \
-  training.train_iterations=50000
+  training.train_epochs=30
 ```
 
 常用資料集參數：

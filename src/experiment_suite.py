@@ -31,8 +31,10 @@ def parse_args():
     exp7.add_argument("--config", default="configs/ecg_baseline_wander_pc_scfm.yaml")
     exp7.add_argument("--output-root", required=True)
     exp7.add_argument("--run-train", action="store_true")
-    exp7.add_argument("--train-iterations", type=int, default=None)
-    exp7.add_argument("--eval-every", type=int, default=None)
+    exp7.add_argument("--train-epochs", type=int, default=None)
+    exp7.add_argument("--train-iterations", type=int, default=None, help="Legacy step-based override.")
+    exp7.add_argument("--eval-every-epochs", type=int, default=None)
+    exp7.add_argument("--eval-every", type=int, default=None, help="Legacy step-based override.")
     exp7.add_argument("--summarize-only", action="store_true")
     exp7.add_argument("--include-best-loss", action="store_true")
     return parser.parse_args()
@@ -326,8 +328,12 @@ def run_exp7_ablation(args):
 
     plan_rows = []
     for name, description, cfg in variants:
+        if args.train_epochs is not None:
+            cfg["training"]["train_epochs"] = args.train_epochs
         if args.train_iterations is not None:
             cfg["training"]["train_iterations"] = args.train_iterations
+        if args.eval_every_epochs is not None:
+            cfg["training"]["eval_every_epochs"] = args.eval_every_epochs
         if args.eval_every is not None:
             cfg["training"]["eval_every"] = args.eval_every
         config_path = config_dir / f"{name}.yaml"

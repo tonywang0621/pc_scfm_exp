@@ -60,7 +60,7 @@ def setup_logger(args, log_dir) -> logging.Logger:
     return logger
 
 
-def plot_loss_curves(train_losses, val_losses, eval_every, results_dir, val_pccs=None):
+def plot_loss_curves(train_losses, val_losses, eval_every, results_dir, val_pccs=None, x_axis_label="Training iteration"):
     loss_curves_dir = Path(results_dir) / "loss_curves"
     loss_curves_dir.mkdir(parents=True, exist_ok=True)
 
@@ -74,7 +74,7 @@ def plot_loss_curves(train_losses, val_losses, eval_every, results_dir, val_pccs
             return
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(steps[valid], values[valid], label=label, linewidth=2, marker="o", markersize=3)
-        ax.set_xlabel("Training iteration")
+        ax.set_xlabel(x_axis_label)
         ax.set_ylabel(ylabel)
         ax.set_title(label)
         ax.grid(True, alpha=0.3)

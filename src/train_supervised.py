@@ -137,7 +137,8 @@ def train():
     else:
         logger.info(
             f"Run: exp_name={exp_name} | model_name={model_name} | "
-            f"train_iterations={args.training.train_iterations} | batch_size={args.training.batch_size}"
+            f"train_epochs={args.training.get('train_epochs', 'step_override')} | "
+            f"batch_size={args.training.batch_size}"
         )
     
     # setup tensorboard 
@@ -174,9 +175,13 @@ def train():
             f"unexpected_keys={len(load_result.unexpected_keys)}"
         )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.training.lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.training.train_iterations, eta_min=1e-5
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=args.training.lr,
+        betas=tuple(args.training.get("betas", [0.8, 0.99])),
+    )
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        optimizer, gamma=float(args.training.get("gamma", 0.99))
     )
     if args.get("log_model_architecture", False):
         logger.info("\n"+"-"*30+"Model Architecture"+"-"*30+"\n")
@@ -211,6 +216,44 @@ def train():
     logger.info("\n"+"-"*30+"Begin Training"+"-"*30+"\n")
 
     # training
+    steps_per_epoch = len(train_loader)
+    if steps_per_epoch == 0:
+        raise ValueError("Train loader is empty; cannot start training.")
+    train_epochs = int(args.training.get("train_epochs", 30))
+    if args.training.get("train_iterations", None) is not None:
+        total_steps = int(args.training.train_iterations)
+        train_epochs = int(np.ceil(total_steps / steps_per_epoch))
+    else:
+        total_steps = train_epochs * steps_per_epoch
+    eval_every_epochs = int(args.training.get("eval_every_epochs", 1))
+    validation_metrics_every_epochs = int(
+        args.training.get("validation_metrics_every_epochs", eval_every_epochs)
+    )
+    save_every_epochs = int(args.training.get("save_every_epochs", 0))
+    step_based_schedule = (
+        args.training.get("train_iterations", None) is not None
+        and args.training.get("eval_every", None) is not None
+    )
+    if step_based_schedule:
+        eval_every_steps = max(int(args.training.eval_every), 1)
+        validation_metrics_every_steps = max(
+            int(args.training.get("validation_metrics_every", eval_every_steps)),
+            eval_every_steps,
+        )
+        save_every_steps = int(args.training.get("save_every", 0))
+    else:
+        eval_every_steps = max(eval_every_epochs * steps_per_epoch, 1)
+        validation_metrics_every_steps = max(
+            validation_metrics_every_epochs * steps_per_epoch,
+            eval_every_steps,
+        )
+        save_every_steps = save_every_epochs * steps_per_epoch if save_every_epochs else 0
+    logger.info(
+        "Training schedule: "
+        f"train_epochs={train_epochs} | total_steps={total_steps} | "
+        f"steps_per_epoch={steps_per_epoch} | eval_every_epochs={eval_every_epochs}"
+    )
+
     train_losses, val_losses = [], []
     val_pccs = []
     val_metric_history = []
@@ -221,12 +264,11 @@ def train():
     training_state_ckpt = checkpoint_dir / 'training_state.pt'
     skip_training = not bool(getattr(model, "requires_training", True))
 
-    patience = args.training.get('early_stopping_patience', 20)
-    min_delta = float(args.training.get('early_stopping_min_delta', 0.0))
-    validation_metrics_every = max(
-        int(args.training.get('validation_metrics_every', args.training.eval_every)),
-        int(args.training.eval_every),
+    patience = args.training.get(
+        'early_stopping_patience_epochs',
+        args.training.get('early_stopping_patience', 8),
     )
+    min_delta = float(args.training.get('early_stopping_min_delta', 0.0))
     patience_counter = 0
     stop_training = False
 
@@ -280,17 +322,16 @@ def train():
             stop_training = True
 
     progress_bar = tqdm(
-        total=args.training.train_iterations,
+        total=total_steps,
         initial=step,
         desc=f"Training {model_name}",
-        unit="iter",
+        unit="step",
         dynamic_ncols=True,
         disable=skip_training or not args.training.get("progress_bar", True),
     )
 
     try:
-        while not skip_training and step < args.training.train_iterations and not stop_training:
-            # logger.info(f'Training iteration {step+1}')
+        while not skip_training and step < total_steps and not stop_training:
             model.train()
 
             for train_batch in train_loader:
@@ -299,20 +340,24 @@ def train():
                 train_loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
-                scheduler.step()
 
                 running_train_loss += train_loss.item()
                 running_train_steps += 1
                 current_step = step + 1
+                current_epoch = int(np.ceil(current_step / steps_per_epoch))
+                epoch_finished = current_step % steps_per_epoch == 0
+                eval_due = current_step % eval_every_steps == 0 if step_based_schedule else (
+                    epoch_finished and current_step % eval_every_steps == 0
+                )
 
                 # evaluation
-                if current_step % args.training.eval_every == 0:
+                if eval_due:
                     model.eval()
                     val_pcc_batches = []
                     last_metrics_step = int(val_metric_history[-1]["step"]) if val_metric_history else None
                     metrics_due = (
                         last_metrics_step is None
-                        or current_step - last_metrics_step >= validation_metrics_every
+                        or current_step - last_metrics_step >= validation_metrics_every_steps
                     )
                     avg_val_loss = None
                     val_noisy_batches, val_clean_batches, val_pred_batches = [], [], []
@@ -350,14 +395,21 @@ def train():
                             low_freq_hz=low_freq_hz,
                             eps=args.dataset.eps,
                         )
-                        val_metric_history.append({"step": current_step, "val_loss": avg_val_loss, **val_metrics})
+                        val_metric_history.append(
+                            {
+                                "epoch": current_epoch,
+                                "step": current_step,
+                                "val_loss": avg_val_loss,
+                                **val_metrics,
+                            }
+                        )
                         with open(checkpoint_dir / "validation_metrics.yaml", "w", encoding="utf-8") as f:
                             yaml.safe_dump(val_metric_history, f, sort_keys=False)
 
-                    # Calculate the average train loss over the last 'eval_every' steps
                     current_train_loss = running_train_loss / running_train_steps
                     log_message = (
-                        f'Training iter {current_step} | train loss: {current_train_loss:.4f} | '
+                        f'Training epoch {current_epoch}/{train_epochs} '
+                        f'(step {current_step}/{total_steps}) | train loss: {current_train_loss:.4f} | '
                         f'val PCC: {avg_val_pcc:.4f}'
                     )
                     if val_metrics is not None:
@@ -376,17 +428,17 @@ def train():
                     val_pccs.append(avg_val_pcc)
 
                     if writer is not None:
-                        writer.add_scalar('Train/Loss', current_train_loss, step)
-                        writer.add_scalar('Val/PCC', avg_val_pcc, step)
+                        writer.add_scalar('Train/Loss', current_train_loss, current_step)
+                        writer.add_scalar('Val/PCC', avg_val_pcc, current_step)
                         if avg_val_loss is not None:
-                            writer.add_scalar('Val/Loss', avg_val_loss, step)
+                            writer.add_scalar('Val/Loss', avg_val_loss, current_step)
                         if val_metrics is not None:
                             for key, value in val_metrics.items():
-                                writer.add_scalar(f'Val/{key}', value, step)
+                                writer.add_scalar(f'Val/{key}', value, current_step)
 
                     # Primary selection and early stopping use validation PCC only.
                     if avg_val_pcc > best_val_pcc + min_delta:
-                        logger.info(f'New best val PCC {avg_val_pcc:.4f} at iteration {current_step}! Saving model...')
+                        logger.info(f'New best val PCC {avg_val_pcc:.4f} at epoch {current_epoch}! Saving model...')
                         best_val_pcc = avg_val_pcc
                         torch.save(model.state_dict(), best_pcc_model_ckpt)
                         patience_counter = 0
@@ -396,12 +448,12 @@ def train():
 
                     # Save best validation-loss checkpoint for auxiliary analysis only.
                     if avg_val_loss is not None and avg_val_loss < best_val_loss:
-                        logger.info(f'New best val loss {avg_val_loss:.4f} at iteration {current_step}! Saving model...')
+                        logger.info(f'New best val loss {avg_val_loss:.4f} at epoch {current_epoch}! Saving model...')
                         best_val_loss = avg_val_loss
                         torch.save(model.state_dict(), best_model_ckpt)
 
                     if patience_counter >= patience:
-                        logger.info(f'Early stopping triggered at iteration {current_step}.')
+                        logger.info(f'Early stopping triggered at epoch {current_epoch}.')
                         torch.save(model.state_dict(), checkpoint_dir / 'model_last.pt')
                         step = current_step
                         progress_bar.update(1)
@@ -443,8 +495,11 @@ def train():
                     running_train_loss = 0
                     running_train_steps = 0
                     model.train()
+                    scheduler.step()
+                elif epoch_finished:
+                    scheduler.step()
 
-                if args.training.get("save_every", 0) and current_step % args.training.save_every == 0:
+                if save_every_steps and current_step % save_every_steps == 0:
                     torch.save(model.state_dict(), checkpoint_dir / f'model_step_{current_step}.pt')
                     _save_training_state(
                         training_state_ckpt,
@@ -462,7 +517,7 @@ def train():
                         args,
                     )
 
-                if current_step >= args.training.train_iterations:
+                if current_step >= total_steps:
                     logger.info(f'Saving last model')
                     torch.save(model.state_dict(), checkpoint_dir / 'model_last.pt')
                     step = current_step
@@ -487,6 +542,7 @@ def train():
                 step = current_step
                 progress_bar.update(1)
                 progress_bar.set_postfix(
+                    epoch=f"{current_epoch}/{train_epochs}",
                     train_loss=f"{train_loss.item():.4f}",
                     patience=f"{patience_counter}/{patience}",
                 )
@@ -519,7 +575,7 @@ def train():
 
         loss_curve_path = plot_loss_curves(
             train_losses, val_losses,
-            args.training.eval_every, eval_dir, val_pccs=val_pccs,
+            eval_every_epochs, eval_dir, val_pccs=val_pccs, x_axis_label="Training epoch",
         )
         logger.info(f"Saved loss curves to {loss_curve_path}")
 
