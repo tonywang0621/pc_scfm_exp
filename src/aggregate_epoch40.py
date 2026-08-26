@@ -22,10 +22,11 @@ METRIC_DIRECTIONS = {
 def parse_args():
     parser = argparse.ArgumentParser(description="Aggregate epoch40 inference, robustness, and complexity results.")
     parser.add_argument("--run-root", required=True)
-    parser.add_argument("--model-key", required=True)
-    parser.add_argument("--checkpoint-path", required=True)
+    parser.add_argument("--model-key", default=None)
+    parser.add_argument("--checkpoint-path", default=None)
     parser.add_argument("--checkpoint-epoch", default="40")
     parser.add_argument("--checkpoint-step", default="58080")
+    parser.add_argument("--metadata-csv", default=None)
     parser.add_argument("--output", required=True)
     return parser.parse_args()
 
@@ -64,9 +65,9 @@ def base_row(args, evaluation_type, dataset, metric, source):
     }
 
 
-def collect_inference(args, run_root):
+def collect_inference(args, run_root, model_key):
     rows = []
-    prefix = f"{args.model_key}_"
+    prefix = f"{model_key}_"
     inference_root = run_root / "inference"
     for summary_path in sorted(inference_root.glob(f"{prefix}*/metrics_summary.csv")):
         dataset = summary_path.parent.name.removeprefix(prefix)
@@ -85,9 +86,9 @@ def collect_inference(args, run_root):
     return rows
 
 
-def collect_robustness_strength(args, run_root):
+def collect_robustness_strength(args, run_root, model_key):
     rows = []
-    robustness_root = run_root / "controlled_tests" / args.model_key / "exp2_strength"
+    robustness_root = run_root / "controlled_tests" / model_key / "exp2_strength"
     for summary_path in sorted(robustness_root.glob("*/summary.csv")):
         for summary in read_csv_rows(summary_path):
             dataset = summary.get("dataset") or summary_path.parent.name
@@ -113,9 +114,9 @@ def collect_robustness_strength(args, run_root):
     return rows
 
 
-def collect_complexity(args, run_root):
+def collect_complexity(args, run_root, model_key):
     rows = []
-    summary_path = run_root / "complexity" / args.model_key / "complexity_summary.csv"
+    summary_path = run_root / "complexity" / model_key / "complexity_summary.csv"
     if not summary_path.exists():
         return rows
     for summary in read_csv_rows(summary_path):
@@ -124,6 +125,44 @@ def collect_complexity(args, run_root):
         row["mean"] = parse_float(summary.get("value"))
         rows.append(row)
     return rows
+
+
+def metadata_records(args, run_root):
+    metadata_path = Path(args.metadata_csv) if args.metadata_csv else run_root / "metadata" / "epoch40_checkpoints.csv"
+    records = {}
+    if metadata_path.exists():
+        for row in read_csv_rows(metadata_path):
+            model_key = row.get("model_key", "")
+            if not model_key:
+                continue
+            records[model_key] = {
+                "model_key": model_key,
+                "checkpoint_epoch": row.get("checkpoint_epoch") or args.checkpoint_epoch,
+                "checkpoint_step": row.get("checkpoint_step") or args.checkpoint_step,
+                "checkpoint_path": row.get("checkpoint_path") or "",
+            }
+
+    if args.model_key:
+        records[args.model_key] = {
+            "model_key": args.model_key,
+            "checkpoint_epoch": args.checkpoint_epoch,
+            "checkpoint_step": args.checkpoint_step,
+            "checkpoint_path": args.checkpoint_path or "",
+        }
+
+    return [records[key] for key in sorted(records)]
+
+
+def args_for_record(args, record):
+    class RecordArgs:
+        pass
+
+    record_args = RecordArgs()
+    record_args.model_key = record["model_key"]
+    record_args.checkpoint_epoch = record.get("checkpoint_epoch") or args.checkpoint_epoch
+    record_args.checkpoint_step = record.get("checkpoint_step") or args.checkpoint_step
+    record_args.checkpoint_path = record.get("checkpoint_path") or ""
+    return record_args
 
 
 def write_rows(path, rows):
@@ -155,9 +194,12 @@ def main():
     args = parse_args()
     run_root = Path(args.run_root)
     rows = []
-    rows.extend(collect_inference(args, run_root))
-    rows.extend(collect_robustness_strength(args, run_root))
-    rows.extend(collect_complexity(args, run_root))
+    for record in metadata_records(args, run_root):
+        record_args = args_for_record(args, record)
+        model_key = record["model_key"]
+        rows.extend(collect_inference(record_args, run_root, model_key))
+        rows.extend(collect_robustness_strength(record_args, run_root, model_key))
+        rows.extend(collect_complexity(record_args, run_root, model_key))
     write_rows(Path(args.output), rows)
     print(f"saved epoch40 aggregate table -> {args.output}")
 

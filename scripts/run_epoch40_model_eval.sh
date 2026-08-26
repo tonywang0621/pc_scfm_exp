@@ -359,11 +359,41 @@ write_aggregate() {
   mkdir -p "$(dirname "$aggregate")"
   python3 aggregate_epoch40.py \
     --run-root "$EPOCH_ROOT" \
-    --model-key "$MODEL_KEY" \
-    --checkpoint-path "$CHECKPOINT" \
-    --checkpoint-epoch "$CHECKPOINT_EPOCH" \
-    --checkpoint-step "$CHECKPOINT_STEP" \
+    --metadata-csv "$EPOCH_ROOT/metadata/epoch40_checkpoints.csv" \
     --output "$aggregate"
+}
+
+write_checkpoint_metadata() {
+  local metadata="$EPOCH_ROOT/metadata/epoch40_checkpoints.csv"
+  mkdir -p "$(dirname "$metadata")"
+  python3 - "$metadata" "$MODEL_KEY" "$CHECKPOINT_EPOCH" "$CHECKPOINT_STEP" "$CHECKPOINT" <<'PY'
+import csv
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+new_row = {
+    "model_key": sys.argv[2],
+    "checkpoint_epoch": sys.argv[3],
+    "checkpoint_step": sys.argv[4],
+    "checkpoint_path": sys.argv[5],
+}
+rows = {}
+if path.exists():
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if row.get("model_key"):
+                rows[row["model_key"]] = row
+rows[new_row["model_key"]] = new_row
+with open(path, "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(
+        f,
+        fieldnames=["model_key", "checkpoint_epoch", "checkpoint_step", "checkpoint_path"],
+    )
+    writer.writeheader()
+    for key in sorted(rows):
+        writer.writerow(rows[key])
+PY
 }
 
 mkdir -p "$EPOCH_ROOT/logs"
@@ -377,6 +407,8 @@ echo "CONFIG=$MODEL_CONFIG"
 echo "CHECKPOINT=$CHECKPOINT"
 echo "OUTPUT_ROOT=$EPOCH_ROOT"
 echo "LOG=$LOG_PATH"
+
+write_checkpoint_metadata
 
 if [[ "$SKIP_INFERENCE" -eq 0 ]]; then
   for item in "${PROCESSED_DATASETS[@]}"; do
