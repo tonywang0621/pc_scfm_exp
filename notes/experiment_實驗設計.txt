@@ -335,26 +335,35 @@ Optional metrics：
 
 Baseline model 目前尚未決定，因此本文件不固定比較模型清單。
 
-但一旦比較模型確定，需遵守：
+但一旦比較模型確定，公平性應分成「固定任務條件」與「模型專屬訓練條件」兩層處理。
+
+固定任務條件必須一致：
 - 相同 train / validation / test split。
 - 相同前處理流程。
 - 相同 Lead II 輸入。
 - 相同 Baseline Wander 合成方式。
 - 相同 evaluation metrics。
-- 相同 hyperparameter tuning 原則。
+- 相同 external test datasets，且 external test 不參與任何模型選擇。
+
+模型專屬訓練條件不必強制一致：
+- Training recipe 不應無條件套用同一組 optimizer、learning rate、scheduler、batch size 或 epoch 數。
+- 較合理的公平性是讓每個 baseline 盡量使用其原論文或官方實作所報告的最佳訓練 recipe，先讓各模型站在論文描述的強狀態，再放到本研究定義的同一個 Baseline Wander Removal 任務上比較 performance。
+- 若原論文沒有完整公開 recipe，應採用官方 repo、作者釋出的 config、或後續 reproducing paper 中最接近的設定；若仍不可得，才使用統一 fallback recipe，並在表格註記。
+- 對本文提出的方法，training recipe 可使用本研究調出的最佳設定，但 tuning budget、validation set 與模型選擇規則需與 baseline 一樣透明。
+- 所有模型允許使用不同 loss function，因為 loss 本身通常是方法的一部分；但最終比較只能用同一套 evaluation metrics，不能直接比較 training loss。
+- Hyperparameter tuning 原則要一致：只能看 PTB-XL validation fold 9，不能看 PTB-XL test fold 10 或 external test results 來調參。
+- 每個模型需保留一份 recipe manifest，記錄 optimizer、learning rate、scheduler、batch size、epoch/iteration budget、early stopping、loss、model selection metric、資料視窗長度與所有和原論文不同之處。
 
 Early stopping 與模型選擇原則：
-- 所有模型必須使用相同 early stopping 機制，避免因停止條件不同造成不公平比較。
 - Model selection 僅使用 PTB-XL validation fold 9。
 - External test datasets，包括 MIT-BIH、Chapman、CPSC，不得用於 early stopping、checkpoint selection 或 hyperparameter tuning。
-- 訓練設定採用 epoch-based 設定：train_epochs = 50000、batch_size = 96、lr = 1e-4。
-- Optimizer 使用 AdamW，betas = [0.8, 0.99]。
-- Learning rate scheduler 使用 ExponentialLR，gamma = 0.99。
-- 每 1 epoch 進行一次 validation evaluation，也就是 eval_every_epochs = 1。
-- Early stopping patience 設為 15 epochs；也就是連續 15 個 validation epochs 未達成主要改善時停止訓練。
+- Early stopping 機制可依論文 recipe 調整；若原論文採固定 epoch、固定 iteration、reduce-on-plateau 或 step decay，應盡量照原設定。
+- 為避免某模型因無限制訓練取得不公平優勢，需事先固定每個模型的訓練 budget，並在報告中列出 wall-clock time、epoch/iteration 數與 best checkpoint 出現位置。
+- 每個模型至少應在固定 validation interval 下同步記錄同一套 validation metrics，方便檢查是否 overfit 或過早停止。
 - 主要模型選擇指標使用 validation PCC，因為 Baseline Wander Removal 需重視 restored ECG 與 clean reference 的波形一致性與 morphology preservation。
 - Validation PCC 需改善至少 1.0e-4 才視為有效改善並重置 patience，避免浮點誤差或極小波動延後 early stopping。
-- Validation 階段每 1 epoch 同步記錄 validation loss、PRD、SNR improvement、low-frequency power reduction、R-peak timing error 與 RR interval MAE，作為 sanity check 與訓練曲線分析；這些指標不參與 patience reset。
+- 若某 baseline 原論文明確以 validation loss 選模，應同時保存 best validation loss checkpoint；正式主表可回報 best validation PCC 與 paper-native selection 兩種結果，或在 supplementary 做 sensitivity analysis。
+- Validation 階段同步記錄 validation loss、PRD、SNR improvement、low-frequency power reduction、R-peak timing error 與 RR interval MAE，作為 sanity check 與訓練曲線分析；這些指標不直接作為跨模型 training loss 比較。
 - 主要回報 checkpoint 採用 best validation PCC checkpoint。
 - 同時保存 best validation loss checkpoint 作為輔助分析，但正式主結果以 best validation PCC checkpoint 為準。
 - 若 validation PCC 無改善但 validation loss 改善，可保存 best loss checkpoint，但不重置 patience，也不改變主要模型選擇標準。
@@ -362,7 +371,13 @@ Early stopping 與模型選擇原則：
 - 訓練結束後可輸出 best validation loss checkpoint 的測試結果作為診斷，但正式表格、統計分析與 robustness summary 必須預設使用 best validation PCC checkpoint。
 - 正式 ablation summary 預設只彙整 best validation PCC checkpoint；best validation loss checkpoint 僅在輔助分析時另行納入。
 - PTB-XL train / validation / test NPZ 必須包含 fold metadata，loader 需強制檢查 folds 1-8 / 9 / 10 是否符合設定。
-- 所有模型的 train_epochs、validation interval、patience、batch size、optimizer 與 learning rate schedule 應固定一致，除非某模型原論文有不可避免的特殊設定；若有特殊設定必須明確報告。
+
+建議 baseline recipe 對齊方向：
+- FCN-DAE：保留原論文 encoder/decoder filter 配置、kernel size 16、ELU、MSE；optimizer、batch size、epoch 與 normalization 優先依原論文或可重現官方實作設定。
+- DRNN：不能只比較單一 LSTM stack；若主張照 Antczak DRNN，需納入論文中的 synthetic pretraining + real-data fine-tuning 或明確標示為 DRNN architecture-only baseline。
+- DeepFilter：保留 MKLANL/LANL multi-branch filter、dilated convolution、SSD+MAD objective 與官方訓練策略；若 PyTorch port 與 Keras/TensorFlow 官方 repo 有差異，需列入 implementation deviation。
+- DeScoD-ECG：使用 conditional diffusion、HNF blocks、quadratic beta schedule、50 diffusion steps、noise prediction loss 與 paper-reported self-ensemble shots；1-shot 應表示單次 reverse sampling，不做多次平均。
+- 本文模型：可採用本研究 validated recipe，但必須和 baselines 使用同一 PTB-XL validation fold 9 做 tuning 與 checkpoint selection。
 
 統計分析建議：
 - 對每個 ECG window 計算指標。
@@ -459,11 +474,13 @@ Early stopping 與模型選擇原則：
 9. 主要指標使用 PRD、SNR improvement、low-frequency power reduction、R-peak/RR interval error。
 10. 輔助指標使用 RMSE、centered cosine similarity、QRS amplitude error、視覺比較與頻譜分析。
 11. Reference-based metrics 只用於有 clean reference 的 synthetic evaluation；real-world no-reference test 使用 PSD/spectrogram、低頻能量變化、R-peak detection 穩定度與視覺檢查。
-12. 加入 ablation study 與 complexity analysis。
-13. 若時間允許，加入 real-world no-reference test。
+12. Baseline training recipe 採 paper-faithful 原則：各模型盡量使用原論文或官方實作的最佳訓練設定，而不是強制共用同一 optimizer、learning rate、scheduler 或 early stopping。
+13. 所有模型使用同一 validation fold 做 tuning 與 checkpoint selection，並完整報告 recipe manifest 與任何 implementation deviation。
+14. 加入 ablation study 與 complexity analysis。
+15. 若時間允許，加入 real-world no-reference test。
 
 一句話總結：
-本研究的實驗環境應設計成「同一訓練來源、同一 Lead II、同一前處理、可重現 Baseline Wander 合成、可控制魯棒性測試、跨資料集外部驗證」的 benchmark，這樣才能有力支持模型在 Baseline Wander Removal 任務上的效能、魯棒性、泛化能力與實務應用價值。
+本研究的實驗環境應設計成「同一任務、同一 Lead II、同一前處理、同一資料切分、可重現 Baseline Wander 合成、各模型採 paper-faithful training recipe、同一套 evaluation metrics、可控制魯棒性測試、跨資料集外部驗證」的 benchmark。這樣比較的是各方法在最佳可辯護狀態下解同一個 Baseline Wander Removal 任務的效能，而不是誰比較適合同一組任意訓練超參數。
 
 
 十四、目前專案實作對應
@@ -493,10 +510,11 @@ Early stopping 與模型選擇原則：
 
 4. 訓練與測試
 - 程式：code/train_supervised.py。
-- 模型：mecg_e、mambattention_ecg、mambattention_stfrft_ecg。
-- mambattention_stfrft_ecg 使用與 mambattention_ecg 相同的資料、訓練、評估與 backbone 參數；唯一差異是將 STFT 前處理替換為 learnable STFrFT。
+- 模型：mecg_e、mambattention_ecg、mambattention_stfrft_ecg、fcn_dae、deepfilter、drnn、descod_ecg_1shot/5shot/10shot 等。
+- mambattention_stfrft_ecg 使用與 mambattention_ecg 相同的資料與主要 backbone 參數；核心差異是將 STFT 前處理替換為 learnable STFrFT。
 - 支援 checkpoint、resume、early stopping、loss curves。
 - 訓練結束會評估 PTB-XL fold 10，若 external NPZ 存在也會評估 MIT-BIH、Chapman、CPSC。
+- 目前多數 YAML 仍使用統一 fallback recipe，例如 train_epochs = 50000、batch_size = 96、lr = 1e-4、AdamW、ExponentialLR、early stopping patience = 15。若正式實驗採 paper-faithful fairness，需為每個 baseline 建立或更新對應 recipe config，並確認 train_supervised.py 實際支援該 optimizer/scheduler/selection rule。
 
 5. Inference
 - 程式：code/inference.py。

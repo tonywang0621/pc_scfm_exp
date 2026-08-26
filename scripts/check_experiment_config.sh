@@ -409,6 +409,23 @@ EXPECTED_BY_MODEL = {
     },
 }
 
+EXPECTED_TRAINING_BY_MODEL = {
+    "fcn_dae": {
+        ("training", "train_epochs"): 1000,
+        ("training", "batch_size"): 32,
+        ("training", "lr"): 1.0e-4,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "StepLR",
+        ("training", "step_size"): 200,
+        ("training", "gamma"): 0.5,
+        ("training", "save_every_epochs"): 50,
+        ("training", "early_stopping_patience_epochs"): 1000,
+        ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
+    },
+}
+
 EXPECTED_MAMBATTENTION_VARIANTS = {
     "ecg_baseline_wander_mambattention.yaml": ("before_mamba", True, True),
     "ecg_baseline_wander_mambattention_no_time_attention.yaml": ("before_mamba", False, True),
@@ -522,9 +539,16 @@ for path in CONFIGS:
     name = path.name
     model_name = data.get("model_name")
 
+    training_overrides = EXPECTED_TRAINING_BY_MODEL.get(model_name, {})
+
     for key_path, expected in EXPECTED.items():
         if model_name in {"descod_ecg_1shot", "descod_ecg_5shot", "descod_ecg_10shot"} and key_path[0] == "model":
             continue
+        if key_path in training_overrides:
+            continue
+        check_value(errors, data, key_path, expected, name)
+
+    for key_path, expected in training_overrides.items():
         check_value(errors, data, key_path, expected, name)
 
     for key_path, expected in EXPECTED_BY_MODEL.get(model_name, {}).items():

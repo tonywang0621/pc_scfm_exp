@@ -24,6 +24,59 @@ from models import get_model
 from datasets import get_dataset 
 
 
+class _NullScheduler:
+    def step(self, *args, **kwargs):
+        return None
+
+    def state_dict(self):
+        return {}
+
+    def load_state_dict(self, state_dict):
+        return None
+
+
+def _build_optimizer(model, training_args):
+    optimizer_name = str(training_args.get("optimizer", "AdamW")).lower()
+    lr = float(training_args.lr)
+    betas = tuple(training_args.get("betas", [0.8, 0.99]))
+    weight_decay = float(training_args.get("weight_decay", 0.0))
+
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=lr,
+            betas=betas,
+            weight_decay=weight_decay,
+        )
+    if optimizer_name == "adam":
+        return torch.optim.Adam(
+            model.parameters(),
+            lr=lr,
+            betas=betas,
+            weight_decay=weight_decay,
+        )
+    raise ValueError(f"Unsupported optimizer: {training_args.get('optimizer')}")
+
+
+def _build_scheduler(optimizer, training_args):
+    scheduler_name = str(training_args.get("scheduler", "ExponentialLR"))
+    scheduler_key = scheduler_name.lower()
+
+    if scheduler_key in {"none", "null", "constantlr"}:
+        return _NullScheduler()
+    if scheduler_key == "exponentiallr":
+        return torch.optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=float(training_args.get("gamma", 0.99))
+        )
+    if scheduler_key == "steplr":
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=int(training_args.get("step_size", 200)),
+            gamma=float(training_args.get("gamma", 0.5)),
+        )
+    raise ValueError(f"Unsupported scheduler: {training_args.get('scheduler')}")
+
+
 def _save_training_state(
     path,
     model,
@@ -175,13 +228,17 @@ def train():
             f"unexpected_keys={len(load_result.unexpected_keys)}"
         )
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.training.lr,
-        betas=tuple(args.training.get("betas", [0.8, 0.99])),
+    optimizer = _build_optimizer(model, args.training)
+    scheduler = _build_scheduler(optimizer, args.training)
+    logger.info(
+        f"Optimizer: {args.training.get('optimizer', 'AdamW')} | "
+        f"lr={args.training.lr} | betas={list(args.training.get('betas', [0.8, 0.99]))} | "
+        f"weight_decay={args.training.get('weight_decay', 0.0)}"
     )
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        optimizer, gamma=float(args.training.get("gamma", 0.99))
+    logger.info(
+        f"Scheduler: {args.training.get('scheduler', 'ExponentialLR')} | "
+        f"gamma={args.training.get('gamma', 'n/a')} | "
+        f"step_size={args.training.get('step_size', 'n/a')}"
     )
     if args.get("log_model_architecture", False):
         logger.info("\n"+"-"*30+"Model Architecture"+"-"*30+"\n")
