@@ -98,6 +98,7 @@ DATASETS=(
   "mit_bih|$DATA_DIR/mit_bih.npz"
   "chapman|$DATA_DIR/chapman.npz"
   "cpsc|$DATA_DIR/cpsc.npz"
+  "qtdb|$DATA_DIR/qtdb.npz"
 )
 
 checkpoint_for() {

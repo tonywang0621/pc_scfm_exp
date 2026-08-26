@@ -14,6 +14,7 @@ if [[ ! -d "$MITBIH_ROOT" ]]; then
 fi
 CHAPMAN_ROOT="$DATA_ROOT/raw/Chapman"
 CPSC_ROOT="$DATA_ROOT/raw/CPSC"
+QTDB_ROOT="$DATA_ROOT/raw/QTDB"
 NOISE_DIR="$DATA_ROOT/raw/NSTDB"
 
 BATCH_SIZE="64"
@@ -25,7 +26,7 @@ SKIP_COMPLEXITY=0
 LIMIT=""
 ALPHA_VALUES="0.05,0.1,0.2,0.3,0.5"
 EXP2_BASELINE_KIND="nstdb"
-DATASETS="ptbxl,mit_bih,chapman,cpsc"
+DATASETS="ptbxl,mit_bih,chapman,cpsc,qtdb"
 CHECKPOINT_STEP="58080"
 CHECKPOINT_EPOCH="40"
 
@@ -54,7 +55,7 @@ Options:
   --limit N               Limit generated robustness windows for smoke tests
   --alpha-values CSV      Robustness strength alpha values. Default: 0.05,0.1,0.2,0.3,0.5
   --baseline-kind KIND    Robustness baseline kind. Default: nstdb
-  --datasets CSV          Datasets to run. Default: ptbxl,mit_bih,chapman,cpsc
+  --datasets CSV          Datasets to run. Default: ptbxl,mit_bih,chapman,cpsc,qtdb
   --checkpoint-step N     Checkpoint step. Default: 58080
   --checkpoint-epoch N    Label used in aggregate. Default: 40
   -h, --help              Show this help
@@ -169,6 +170,7 @@ PROCESSED_DATASETS=(
   "mit_bih|$DATA_DIR/mit_bih.npz"
   "chapman|$DATA_DIR/chapman.npz"
   "cpsc|$DATA_DIR/cpsc.npz"
+  "qtdb|$DATA_DIR/qtdb.npz"
 )
 
 dataset_selected() {
@@ -223,6 +225,15 @@ dataset_args() {
         local metadata="$CPSC_ROOT/metadata.csv"
         [[ -f "$metadata" ]] || metadata="__none__"
         printf '%s\n' cpsc cpsc cpsc "$CPSC_ROOT" "$metadata"
+        return 0
+      fi
+      return 1
+      ;;
+    qtdb|qt|qtdb-test)
+      if [[ -d "$QTDB_ROOT" ]]; then
+        local metadata="$QTDB_ROOT/metadata.csv"
+        [[ -f "$metadata" ]] || metadata="__none__"
+        printf '%s\n' qtdb qtdb qtdb "$QTDB_ROOT" "$metadata"
         return 0
       fi
       return 1

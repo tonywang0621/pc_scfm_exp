@@ -13,7 +13,7 @@ Runs Experiment 3 baseline-frequency robustness for one model across requested d
 Examples:
   bash scripts/run_exp3_for_model.sh mecge
   bash scripts/run_exp3_for_model.sh mambattention --datasets ptbxl
-  bash scripts/run_exp3_for_model.sh mambattention_stfrft --datasets mit_bih,chapman,cpsc
+  bash scripts/run_exp3_for_model.sh mambattention_stfrft --datasets mit_bih,chapman,cpsc,qtdb
 
 MODEL_KEY must match scripts/experiment_models.sh, e.g. mecge, mambattention,
 mambattention_stfrft, pc_scfm, fcn_dae, deepfilter, drnn.

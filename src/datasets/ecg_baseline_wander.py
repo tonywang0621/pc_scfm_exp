@@ -28,7 +28,7 @@ class ECGBaselineWanderDataset(Dataset):
       train.npz, val.npz, test.npz
 
     External test datasets are optional and use the same NPZ schema:
-      mit_bih.npz, chapman.npz, cpsc.npz
+      mit_bih.npz, chapman.npz, cpsc.npz, qtdb.npz
 
     Each NPZ must contain:
       noisy_ecg or input: model input with synthetic/real baseline wander
@@ -47,6 +47,7 @@ class ECGBaselineWanderDataset(Dataset):
         "mit-bih": "mit_bih.npz",
         "chapman": "chapman.npz",
         "cpsc": "cpsc.npz",
+        "qtdb": "qtdb.npz",
     }
 
     def __init__(self, data_mode="train", **kwargs):

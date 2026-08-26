@@ -482,7 +482,7 @@ Early stopping 與模型選擇原則：
 - Training：folds 1-8，約 80%。
 - Validation：fold 9，約 10%。
 - In-domain test：fold 10，約 10%。
-- External test：mit_bih.npz、chapman.npz、cpsc.npz，100% test only。
+- External test：mit_bih.npz、chapman.npz、cpsc.npz、qtdb.npz，100% test only。
 - Dataset loader 會要求 PTB-XL train/val/test NPZ 具備 fold metadata，並檢查 train/val/test 是否符合 official folds。
 
 3. Baseline Wander 合成

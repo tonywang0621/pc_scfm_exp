@@ -13,7 +13,7 @@ Runs Experiment 2 baseline-strength robustness for one model across requested da
 Examples:
   bash scripts/run_exp2_for_model.sh mecge
   bash scripts/run_exp2_for_model.sh mambattention --datasets ptbxl
-  bash scripts/run_exp2_for_model.sh mambattention_stfrft --datasets mit_bih,chapman,cpsc
+  bash scripts/run_exp2_for_model.sh mambattention_stfrft --datasets mit_bih,chapman,cpsc,qtdb
 
 MODEL_KEY must match scripts/experiment_models.sh, e.g. mecge, mambattention,
 mambattention_stfrft, pc_scfm, fcn_dae, deepfilter, drnn.

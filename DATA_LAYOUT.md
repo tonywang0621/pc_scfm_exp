@@ -59,6 +59,7 @@ ecg_baseline_wander/
     mit_bih.npz
     chapman.npz
     cpsc.npz
+    qtdb.npz
 
   controlled_tests/
     exp2_strength/
@@ -96,6 +97,7 @@ processed/test.npz
 processed/mit_bih.npz
 processed/chapman.npz
 processed/cpsc.npz
+processed/qtdb.npz
 ```
 
 Training uses `val.npz` as the PTB-XL fold 9 validation split for checkpoint selection and early stopping. PTB-XL train/val/test NPZ files must include fold metadata so the loader can enforce the official fold split.
@@ -194,6 +196,7 @@ runs/ecg_baseline_wander/
         metrics_mit_bih.yaml
         metrics_chapman.yaml
         metrics_cpsc.yaml
+        metrics_qtdb.yaml
         complexity_summary.yaml
       best_loss/
 

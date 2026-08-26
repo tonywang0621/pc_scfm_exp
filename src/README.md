@@ -117,6 +117,7 @@ test.npz   -> PTB-XL fold 10，約 10%
 mit_bih.npz   -> 100% 僅測試
 chapman.npz   -> 100% 僅測試
 cpsc.npz      -> 100% 僅測試
+qtdb.npz      -> 100% 僅測試
 ```
 
 外部資料不得用於訓練、驗證、early stopping、checkpoint 選擇或超參數調整。
@@ -150,6 +151,7 @@ test.npz
 mit_bih.npz
 chapman.npz
 cpsc.npz
+qtdb.npz
 ```
 
 訓練時只使用 `val.npz` 作為 PTB-XL fold 9 validation 監控與 checkpoint selection。
@@ -255,7 +257,7 @@ python preprocess_ecg.py \
   --dataset-name chapman
 ```
 
-若要處理其他外部資料集，請將 `--dataset-name` 設為 `mit_bih` 或 `cpsc`。
+若要處理其他外部資料集，請將 `--dataset-name` 設為 `mit_bih`、`cpsc` 或 `qtdb`。
 
 外部資料集會輸出成：
 
@@ -263,6 +265,7 @@ python preprocess_ecg.py \
 mit_bih.npz
 chapman.npz
 cpsc.npz
+qtdb.npz
 ```
 
 這些檔案只會被訓練後評估或推論讀取，不會參與 training、validation、early stopping 或 checkpoint 選擇。
@@ -366,7 +369,7 @@ training.resume=True  -> 保留既有資料夾，並從 training_state.pt 繼續
 
 ```text
 PTB-XL fold 10 test set
-若存在外部測試 NPZ 檔案，也會評估：mit_bih.npz、chapman.npz、cpsc.npz
+若存在外部測試 NPZ 檔案，也會評估：mit_bih.npz、chapman.npz、cpsc.npz、qtdb.npz
 ```
 
 明確執行推論：
@@ -441,6 +444,7 @@ metrics_ptbxl_fold10_test.yaml
 metrics_mit_bih.yaml
 metrics_chapman.yaml
 metrics_cpsc.yaml
+metrics_qtdb.yaml
 complexity_summary.yaml
 ```
 

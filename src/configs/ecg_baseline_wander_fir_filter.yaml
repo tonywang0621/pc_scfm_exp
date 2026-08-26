@@ -40,6 +40,7 @@ dataset:
     - mit_bih
     - chapman
     - cpsc
+    - qtdb
   lead: II
   split:
     strategy: ptbxl_official_folds
@@ -90,4 +91,3 @@ model:
   fir_window: kaiser
   kaiser_beta: 8.6
   zero_phase: True
-

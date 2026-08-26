@@ -39,7 +39,7 @@ EXPECTED = {
     ("dataset", "name"): "ecg_baseline_wander",
     ("dataset", "data_dir"): "${data_dir}",
     ("dataset", "train_dataset"): "ptbxl",
-    ("dataset", "external_test_datasets"): ["mit_bih", "chapman", "cpsc"],
+    ("dataset", "external_test_datasets"): ["mit_bih", "chapman", "cpsc", "qtdb"],
     ("dataset", "lead"): "II",
     ("dataset", "split", "strategy"): "ptbxl_official_folds",
     ("dataset", "split", "patient_wise"): True,

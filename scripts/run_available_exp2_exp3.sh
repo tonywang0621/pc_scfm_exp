@@ -12,6 +12,7 @@ if [[ ! -d "$MITBIH_ROOT" ]]; then
 fi
 CHAPMAN_ROOT="$DATA_ROOT/raw/Chapman"
 CPSC_ROOT="$DATA_ROOT/raw/CPSC"
+QTDB_ROOT="$DATA_ROOT/raw/QTDB"
 NOISE_DIR="$DATA_ROOT/raw/NSTDB"
 
 BATCH_SIZE="64"
@@ -25,7 +26,7 @@ FREQUENCIES_HZ="0.05,0.1,0.2,0.3,0.5,0.8,1.0"
 FREQUENCY_ALPHA="0.2"
 EXP2_BASELINE_KIND="nstdb"
 EXP3_BASELINE_KIND="sinusoidal"
-DATASETS="ptbxl,mit_bih,chapman,cpsc"
+DATASETS="ptbxl,mit_bih,chapman,cpsc,qtdb"
 MODELS=""
 
 usage() {
@@ -48,7 +49,7 @@ Options:
   --alpha-values CSV    Exp2 alpha values. Default: 0.05,0.1,0.2,0.3,0.5
   --frequencies-hz CSV  Exp3 frequencies. Default: 0.05,0.1,0.2,0.3,0.5,0.8,1.0
   --frequency-alpha A   Exp3 alpha value. Default: 0.2
-  --datasets CSV        Datasets to run. Default: ptbxl,mit_bih,chapman,cpsc
+  --datasets CSV        Datasets to run. Default: ptbxl,mit_bih,chapman,cpsc,qtdb
   --models CSV          Model keys to run. Default: all models in experiment_models.sh
   -h, --help            Show this help
 
@@ -60,6 +61,7 @@ Optional external raw dataset defaults:
   data/ecg_baseline_wander/raw/MITBIH/ or data/ecg_baseline_wander/raw/MIT-BIH/
   data/ecg_baseline_wander/raw/Chapman/
   data/ecg_baseline_wander/raw/CPSC/
+  data/ecg_baseline_wander/raw/QTDB/
 
 Experiment 2 uses NSTDB by default and requires:
   data/ecg_baseline_wander/raw/NSTDB/
@@ -195,6 +197,15 @@ dataset_args() {
         local metadata="$CPSC_ROOT/metadata.csv"
         [[ -f "$metadata" ]] || metadata="__none__"
         printf '%s\n' cpsc cpsc cpsc "$CPSC_ROOT" "$metadata"
+        return 0
+      fi
+      return 1
+      ;;
+    qtdb|qt|qtdb-test)
+      if [[ -d "$QTDB_ROOT" ]]; then
+        local metadata="$QTDB_ROOT/metadata.csv"
+        [[ -f "$metadata" ]] || metadata="__none__"
+        printf '%s\n' qtdb qtdb qtdb "$QTDB_ROOT" "$metadata"
         return 0
       fi
       return 1

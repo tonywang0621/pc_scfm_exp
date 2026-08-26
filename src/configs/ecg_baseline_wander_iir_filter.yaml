@@ -40,6 +40,7 @@ dataset:
     - mit_bih
     - chapman
     - cpsc
+    - qtdb
   lead: II
   split:
     strategy: ptbxl_official_folds
@@ -89,4 +90,3 @@ model:
   iir_order: 1
   iir_method: butterworth
   zero_phase: True
-

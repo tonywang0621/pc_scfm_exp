@@ -140,6 +140,7 @@ bash scripts/check_project.sh
 <PROJECT_ROOT>/data/ecg_baseline_wander/processed/mit_bih.npz
 <PROJECT_ROOT>/data/ecg_baseline_wander/processed/chapman.npz
 <PROJECT_ROOT>/data/ecg_baseline_wander/processed/cpsc.npz
+<PROJECT_ROOT>/data/ecg_baseline_wander/processed/qtdb.npz
 ```
 
 每個 NPZ 建議包含：
@@ -212,6 +213,7 @@ python3 preprocess_ecg.py \
 mit_bih
 chapman
 cpsc
+qtdb
 ```
 
 ## 訓練模型

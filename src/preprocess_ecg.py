@@ -28,7 +28,11 @@ def parse_args():
     parser.add_argument("--config", default="configs/ecg_baseline_wander_mecg_e.yaml")
     parser.add_argument("--input-dir", required=True, help="Directory containing source ECG files.")
     parser.add_argument("--output-dir", default=None, help="Defaults to dataset.data_dir/processed.")
-    parser.add_argument("--dataset-name", default="ptbxl", choices=["ptbxl", "mit_bih", "chapman", "cpsc"])
+    parser.add_argument(
+        "--dataset-name",
+        default="ptbxl",
+        choices=["ptbxl", "mit_bih", "chapman", "cpsc", "qtdb"],
+    )
     parser.add_argument("--metadata-csv", default=None, help="Optional CSV with file path and fold columns.")
     parser.add_argument("--noise-dir", default=None, help="Optional NSTDB/noise ECG directory.")
     parser.add_argument("--source-fs", type=float, default=None, help="Override source sampling rate.")
@@ -194,17 +198,20 @@ def select_lead(ecg, lead="II", lead_names=None):
     if ecg.shape[0] < ecg.shape[1] and ecg.shape[0] <= 16:
         ecg = ecg.T
 
-    index = 0
     if lead_names:
         aliases = LEAD_ALIASES.get(str(lead).lower(), [str(lead).lower()])
         normalized = [str(name).lower().replace("-", "_") for name in lead_names]
         for idx, name in enumerate(normalized):
             if name in aliases:
-                index = idx
-                break
+                return ecg[:, idx]
+        raise ValueError(
+            f"Requested lead {lead!r} was not found in available leads {list(lead_names)!r}."
+        )
     elif str(lead).upper() == "II" and ecg.shape[1] > 1:
-        index = 1
-    return ecg[:, index]
+        return ecg[:, 1]
+    raise ValueError(
+        f"Requested lead {lead!r} was not found and no usable lead names were provided."
+    )
 
 
 def filter_ecg(ecg, fs, cfg):
@@ -369,7 +376,12 @@ def main():
     output_dir = Path(args.output_dir or (Path(dataset_cfg["data_dir"]) / "processed"))
     output_dir.mkdir(parents=True, exist_ok=True)
     file_map = {"train": "train.npz", "val": "val.npz", "test": "test.npz"}
-    file_map.update({"mit_bih": "mit_bih.npz", "chapman": "chapman.npz", "cpsc": "cpsc.npz"})
+    file_map.update({
+        "mit_bih": "mit_bih.npz",
+        "chapman": "chapman.npz",
+        "cpsc": "cpsc.npz",
+        "qtdb": "qtdb.npz",
+    })
 
     output_splits = requested_splits or (
         {"train", "val", "test"} if args.dataset_name == "ptbxl" else {args.dataset_name}
@@ -396,6 +408,7 @@ def main():
     clean_by_split = {}
     noisy_by_split = {}
     folds_by_split = {}
+    skipped_records = 0
 
     records = discover_records(args.input_dir)
     if args.limit:
@@ -410,7 +423,12 @@ def main():
 
         ecg, fs, leads = load_record(record_path)
         fs = float(args.source_fs or fs or target_fs)
-        lead = select_lead(ecg, lead=dataset_cfg.get("lead", "II"), lead_names=leads)
+        try:
+            lead = select_lead(ecg, lead=dataset_cfg.get("lead", "II"), lead_names=leads)
+        except ValueError as exc:
+            skipped_records += 1
+            print(f"skipping {record_path}: {exc}")
+            continue
         clean = filter_ecg(lead, fs, cfg)
         clean = resample_ecg(clean, fs, target_fs)
 
@@ -436,6 +454,8 @@ def main():
             folds_by_split.get(split_name),
         )
         print(f"saved {split_name}: {len(clean_windows)} windows -> {output_dir / file_map[split_name]}")
+    if skipped_records:
+        print(f"skipped {skipped_records} records because the requested lead was unavailable.")
 
 
 if __name__ == "__main__":

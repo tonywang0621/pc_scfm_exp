@@ -16,6 +16,7 @@ DEFAULT_SPLIT_FILES = (
     "mit_bih.npz",
     "chapman.npz",
     "cpsc.npz",
+    "qtdb.npz",
 )
 
 
