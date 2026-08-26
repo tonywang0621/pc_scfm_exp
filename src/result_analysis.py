@@ -50,6 +50,23 @@ def parse_args():
     paired.add_argument("--metrics", default=None, help="Comma-separated metrics. Defaults to shared numeric metrics.")
     paired.add_argument("--correction", choices=["holm", "bonferroni", "none"], default="holm")
     paired.add_argument("--alpha", type=float, default=0.05)
+    paired.add_argument(
+        "--group-by",
+        choices=["window", "record"],
+        default="window",
+        help=(
+            "Statistical unit for the paired test. `window` (default) pairs "
+            "every individual window_index -- window-wise samples from the "
+            "same record are not fully independent. `record` first averages "
+            "each metric per record_id (patient-level for PTB-XL, "
+            "record-level for external test sets, which are one-record-per-"
+            "patient) within each file, then pairs on the shared record_id, "
+            "giving samples much closer to independent at the cost of a "
+            "smaller n. Requires metrics_per_window.csv to have a "
+            "`record_id` column (produced by preprocess_ecg.py + "
+            "inference.py); regenerate the NPZ/inference outputs if missing."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -294,28 +311,51 @@ def plot_case(path, idx, value, metric, noisy, restored, clean, fs):
     plt.close(fig)
 
 
-def paired_stats(baseline_path, candidate_path, output, metrics, correction, alpha):
+def paired_stats(baseline_path, candidate_path, output, metrics, correction, alpha, group_by="window"):
     np = require_numpy()
     from scipy import stats
 
-    baseline_rows = keyed_rows(read_csv_rows(baseline_path))
-    candidate_rows = keyed_rows(read_csv_rows(candidate_path))
-    shared_indices = sorted(set(baseline_rows) & set(candidate_rows))
-    if not shared_indices:
-        raise ValueError("No shared window_index values between baseline and candidate files.")
+    baseline_raw = read_csv_rows(baseline_path)
+    candidate_raw = read_csv_rows(candidate_path)
+
+    if group_by == "record":
+        if not baseline_raw or "record_id" not in baseline_raw[0]:
+            raise ValueError(
+                f"{baseline_path} has no `record_id` column -- --group-by record requires "
+                "regenerating the NPZ with preprocess_ecg.py (record_id is now saved per "
+                "window) and re-running inference.py so metrics_per_window.csv carries it."
+            )
+        if not candidate_raw or "record_id" not in candidate_raw[0]:
+            raise ValueError(
+                f"{candidate_path} has no `record_id` column -- see the message above."
+            )
+        baseline_grouped = keyed_rows_by(baseline_raw, "record_id")
+        candidate_grouped = keyed_rows_by(candidate_raw, "record_id")
+        shared_keys = sorted(set(baseline_grouped) & set(candidate_grouped))
+        if not shared_keys:
+            raise ValueError("No shared record_id values between baseline and candidate files.")
+    else:
+        baseline_grouped = keyed_rows_by(baseline_raw, "window_index")
+        candidate_grouped = keyed_rows_by(candidate_raw, "window_index")
+        shared_keys = sorted(set(baseline_grouped) & set(candidate_grouped), key=lambda x: int(x))
+        if not shared_keys:
+            raise ValueError("No shared window_index values between baseline and candidate files.")
 
     metric_names = (
         [metric.strip() for metric in metrics.split(",") if metric.strip()]
         if metrics
-        else infer_shared_numeric_metrics(baseline_rows, candidate_rows, shared_indices)
+        else infer_shared_numeric_metrics(baseline_raw, candidate_raw)
     )
 
     rows = []
     for metric in metric_names:
         baseline_values, candidate_values = [], []
-        for idx in shared_indices:
-            b = parse_float(baseline_rows[idx].get(metric))
-            c = parse_float(candidate_rows[idx].get(metric))
+        for key in shared_keys:
+            # group_by="window": exactly one row per key; group_by="record":
+            # average the metric across every window belonging to that
+            # record_id, so each record contributes a single paired sample.
+            b = nan_mean(parse_float(row.get(metric)) for row in baseline_grouped[key])
+            c = nan_mean(parse_float(row.get(metric)) for row in candidate_grouped[key])
             if not math.isnan(b) and not math.isnan(c):
                 baseline_values.append(b)
                 candidate_values.append(c)
@@ -333,6 +373,7 @@ def paired_stats(baseline_path, candidate_path, output, metrics, correction, alp
             {
                 "metric": metric,
                 "direction": METRIC_DIRECTIONS.get(metric, ""),
+                "unit": group_by,
                 "n": len(diff),
                 "baseline_mean": float(np.mean(b)),
                 "candidate_mean": float(np.mean(c)),
@@ -354,6 +395,7 @@ def paired_stats(baseline_path, candidate_path, output, metrics, correction, alp
     fieldnames = [
         "metric",
         "direction",
+        "unit",
         "n",
         "baseline_mean",
         "candidate_mean",
@@ -368,25 +410,40 @@ def paired_stats(baseline_path, candidate_path, output, metrics, correction, alp
         "alpha",
     ]
     write_csv(output, rows, fieldnames)
-    print(f"saved paired statistics -> {output}")
+    print(f"saved paired statistics ({group_by}-level, n={len(shared_keys)} shared {group_by} keys) -> {output}")
 
 
-def keyed_rows(rows):
-    return {int(row["window_index"]): row for row in rows if row.get("window_index", "").strip() != ""}
+def keyed_rows_by(rows, key_field):
+    """Group CSV rows by `key_field` (e.g. "window_index" or "record_id")
+    into {key: [rows]}. Always returns lists so window-level (one row per
+    key) and record-level (many windows per record_id) grouping share the
+    same downstream aggregation code path (see nan_mean in paired_stats).
+    """
+    grouped = {}
+    for row in rows:
+        key = row.get(key_field)
+        if key is None or str(key).strip() == "":
+            continue
+        grouped.setdefault(str(key), []).append(row)
+    return grouped
 
 
-def infer_shared_numeric_metrics(baseline_rows, candidate_rows, indices):
-    keys = set()
-    for idx in indices[: min(10, len(indices))]:
-        keys.update(baseline_rows[idx].keys())
-        keys.update(candidate_rows[idx].keys())
-    keys.discard("window_index")
+def nan_mean(values):
+    valid = [value for value in values if not math.isnan(value)]
+    if not valid:
+        return float("nan")
+    return sum(valid) / len(valid)
+
+
+def infer_shared_numeric_metrics(baseline_rows, candidate_rows):
+    if not baseline_rows or not candidate_rows:
+        return []
+    exclude = {"window_index", "record_id"}
+    keys = (set(baseline_rows[0].keys()) & set(candidate_rows[0].keys())) - exclude
     metrics = []
     for key in sorted(keys):
-        for idx in indices:
-            b = parse_float(baseline_rows[idx].get(key))
-            c = parse_float(candidate_rows[idx].get(key))
-            if not math.isnan(b) and not math.isnan(c):
+        for row in baseline_rows[: min(20, len(baseline_rows))]:
+            if not math.isnan(parse_float(row.get(key))):
                 metrics.append(key)
                 break
     return metrics
@@ -444,7 +501,9 @@ def main():
     elif args.command == "select-cases":
         select_cases(args.inference_dir, args.output_dir, args.metric, args.direction, args.fs)
     elif args.command == "paired-stats":
-        paired_stats(args.baseline, args.candidate, args.output, args.metrics, args.correction, args.alpha)
+        paired_stats(
+            args.baseline, args.candidate, args.output, args.metrics, args.correction, args.alpha, args.group_by
+        )
 
 
 if __name__ == "__main__":

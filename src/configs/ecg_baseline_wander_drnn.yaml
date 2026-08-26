@@ -13,16 +13,24 @@ log_config: False
 log_model_architecture: False
 
 training:
+  # DRNN paper-faithful recipe (Antczak 2018, Section 2.4 / 3.1): Adam optimizer,
+  # 64 samples per batch, MSE loss. The paper does not report a learning rate or
+  # an LR schedule, nor an epoch budget for training on the full real dataset
+  # (its stated 50-epoch budget applies only to the small 2000-sample synthetic
+  # architecture-search phase, not to this project's PTB-XL-scale training).
+  # train_epochs / early_stopping_patience_epochs use this project's unified
+  # cross-baseline training budget (50000 / 15, validation-PCC-driven) per
+  # notes/experiment_實驗設計.txt.
   train_epochs: 50000
-  batch_size: 96
+  batch_size: 64
   lr: 1.0e-4
-  optimizer: AdamW
-  betas: [0.8, 0.99]
-  scheduler: ExponentialLR
-  gamma: 0.99
+  optimizer: Adam
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+  scheduler: none
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
-  save_every_epochs: 5
+  save_every_epochs: 50
   early_stopping_patience_epochs: 15
   early_stopping_min_delta: 1.0e-4
   progress_bar: True
@@ -38,8 +46,8 @@ dataset:
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
-    - chapman
     - cpsc
+    - chapman
     - qtdb
   lead: II
   split:
@@ -56,12 +64,21 @@ dataset:
     bandpass_hz: [0.05, 40.0]
   resample_hz: 250
   window_size: 512
-  overlap_ratio: 0.5
+  overlap_ratio: 0.0
   normalization: z_score
   baseline_wander:
     train_source: nstdb
+    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
+    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
+    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
+    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
+    # range. robustness_alpha_values is a separate, discrete grid used only
+    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
+    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_values: [0.05, 0.1, 0.2, 0.3, 0.5]
+    alpha_sampling: uniform_range
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
     test_types:
       - nstdb
@@ -85,9 +102,13 @@ model:
   hop_size: 8
   win_size: 64
   beta: 2
+  # DRNN paper-faithful architecture (Antczak 2018, Fig. 5 / Section 3.1 best
+  # network): single 64-unit LSTM layer + two 64-unit ReLU dense layers +
+  # one linear output layer. See notes/experiment_實驗設計.txt "DRNN
+  # architecture-only baseline" note for what is/isn't reproduced.
   input_size: 1
-  lstm_hidden_sizes: [64, 32, 32, 32, 32]
-  dense_layers: []
+  lstm_hidden_sizes: [64]
+  dense_layers: [64, 64]
   output_size: 1
   dropout: 0.0
   residual: False

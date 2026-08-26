@@ -176,7 +176,15 @@ def write_sweep_summary(path, sweep_rows):
 
 def run_exp2_strength(args):
     cfg = load_yaml(SCRIPT_DIR / args.config if not Path(args.config).is_absolute() else args.config)
-    default_alphas = cfg["dataset"]["baseline_wander"].get("alpha_values", [0.05, 0.1, 0.2, 0.3, 0.5])
+    bw_cfg = cfg["dataset"]["baseline_wander"]
+    # `alpha_values` in the base config is now the [low, high] continuous
+    # training-time sampling range (MECG-E/DeepFilter delta ~ U(0.2, 2.0)),
+    # not a discrete sweep grid, so the robustness sweep uses its own
+    # dedicated grid: `robustness_alpha_values`, defaulting to the
+    # DeepFilter/MECG-E noise-amplitude bin edges (Table III-VI: 0.2-0.6,
+    # 0.6-1.0, 1.0-1.5, 1.5-2.0) rather than the old 5%/10%/.../50%
+    # peak-to-peak-ratio grid.
+    default_alphas = bw_cfg.get("robustness_alpha_values", [0.2, 0.6, 1.0, 1.5, 2.0])
     alphas = comma_values(args.alpha_values, default_alphas)
     root = Path(args.output_root)
     dataset_label = args.dataset_label or args.dataset_name

@@ -149,7 +149,11 @@ noisy_ecg = clean_reference + alpha * baseline_wander
 - 使用 NSTDB Baseline Wander。
 - 從 NSTDB 隨機取樣 baseline segment。
 - 將 baseline segment 裁切或重取樣到與 ECG window 相同長度。
-- 使用隨機 alpha 控制污染強度。
+- alpha 對齊 MECG-E（Hung et al. 2024）／DeepFilter（Romero et al. 2021）的雜訊縮放公式：
+  noise 先以自身 peak-to-peak 範圍正規化，alpha（對應論文的 delta）從
+  Uniform(0.2, 2.0) 連續隨機抽樣，再乘上 clean ECG 的 peak-to-peak 範圍
+  （對應 `dataset.baseline_wander.alpha_sampling: uniform_range`、
+  `alpha_values: [0.2, 2.0]`）。
 
 控制變因測試：
 - Sinusoidal baseline。
@@ -157,8 +161,9 @@ noisy_ecg = clean_reference + alpha * baseline_wander
 - Random low-frequency drift。
 - NSTDB real baseline。
 
-建議強度設定：
-- ECG peak-to-peak amplitude 的 5%、10%、20%、30%、50%。
+建議強度設定（Experiment 2 robustness sweep 專用，固定 alpha 逐一測試）：
+- 對齊 DeepFilter／MECG-E 論文回報的 noise-amplitude 分段：0.2–0.6、0.6–1.0、
+  1.0–1.5、1.5–2.0（對應 `robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]`）。
 
 建議頻率設定：
 - 0.05、0.1、0.2、0.3、0.5、0.8、1.0 Hz。
@@ -377,13 +382,28 @@ Early stopping 與模型選擇原則：
 - DRNN：不能只比較單一 LSTM stack；若主張照 Antczak DRNN，需納入論文中的 synthetic pretraining + real-data fine-tuning 或明確標示為 DRNN architecture-only baseline。
 - DeepFilter：保留 MKLANL/LANL multi-branch filter、dilated convolution、SSD+MAD objective 與官方訓練策略；若 PyTorch port 與 Keras/TensorFlow 官方 repo 有差異，需列入 implementation deviation。
 - DeScoD-ECG：使用 conditional diffusion、HNF blocks、quadratic beta schedule、50 diffusion steps、noise prediction loss 與 paper-reported self-ensemble shots；1-shot 應表示單次 reverse sampling，不做多次平均。
+- MECG-E：TF-Bi-Mamba + dense encoder/decoder 架構、STFT 設定（Hamming/實際為 Hann、n_fft=64、hop=8）、
+  time+com+con 三項 loss（含 lambda 權重）與 AdamW/lr=1e-4/ExponentialLR(gamma=0.99)/weight_decay=1e-2
+  依論文與官方 khhungg/MECG-E repo 對齊；epoch 數改用本專案統一 budget（見上）。
+- EDDM：dual-path 擴散（ECG noise + Gaussian noise 分開建模）、DAPP U-Net、RAdam/lr=1e-5/batch=64；
+  論文無公開 repo，alpha_t/beta_t 的 linear-decrease 排列為依論文限制條件重建，非驗證過的官方實作。
+- FIR/IIR：濾波器設計參數（order/cutoff/beta）依 DeepFilter 論文（Romero et al. 2021 Section 5.2）版本
+  對齊：IIR order=4、Butterworth、cutoff=0.67Hz、zero-phase，皆已生效。FIR 因論文 order=8079 與本專案
+  共用 window_size=512 不相容（filtfilt padlen 遠大於 512，會悄悄退化成非 zero-phase），改用 order=56、
+  cutoff=0.67Hz、beta=2.18 折衷（56 亦為另一篇論文 docs/fir_iir_filter.pdf 實證的最佳 FIR order）。
 - 本文模型：可採用本研究 validated recipe，但必須和 baselines 使用同一 PTB-XL validation fold 9 做 tuning 與 checkpoint selection。
 
 統計分析建議：
 - 對每個 ECG window 計算指標。
 - 每個 dataset 回報 mean ± standard deviation。
 - 模型間比較使用 paired statistical test。
-- 因固定長度切片使用 overlap windows，window-wise samples 不應被解讀為完全獨立個體；若 metadata 足夠，建議補充 record-level 或 patient-level aggregation 作為 sensitivity analysis。
+- overlap_ratio 已改為 0（不重疊切窗），window-wise samples 之間不再有重疊樣本點，較接近獨立假設；但同一筆紀錄／同一位病人切出的多個 window 彼此仍非完全獨立（同源訊號、時間相鄰）。
+- Record-level／patient-level aggregation 已實作為 sensitivity analysis 選項：preprocess_ecg.py 會把每個 window 的來源 record_id
+  存進 NPZ（PTB-XL 優先用 metadata 的 patient_id，一位病人可能對到多筆紀錄；MIT-BIH/Chapman/CPSC/QTDB 用檔名本身，因為這些
+  資料集的標準發布是一筆紀錄對一位病人，MIT-BIH 已知的 201/202 同病人例外有另外處理），inference.py 會把 record_id 寫進
+  metrics_per_window.csv，`result_analysis.py paired-stats --group-by record` 會先對每個 record_id 內的所有 window 取平均，
+  再用這些聚合值做 paired t-test/Wilcoxon（預設仍是 `--group-by window`，逐 window 比較）。**注意：這是新加的欄位，先前產生的
+  NPZ／metrics_per_window.csv 沒有 record_id，要先重新跑 preprocess_ecg.py + inference.py 才能用 `--group-by record`。**
 - 若分布不符合常態，可使用 Wilcoxon signed-rank test。
 - 多重比較使用 Bonferroni 或 Holm correction。
 - 顯著水準 alpha = 0.05。
@@ -505,7 +525,11 @@ Early stopping 與模型選擇原則：
 3. Baseline Wander 合成
 - 程式：code/preprocess_ecg.py。
 - 支援 NSTDB、sinusoidal、multi_sine、random low-frequency drift。
-- 支援 alpha_values，例如 0.05、0.1、0.2、0.3、0.5。
+- 主訓練/評估用 alpha_sampling: uniform_range，alpha_values: [0.2, 2.0]（連續均勻抽樣，對齊
+  MECG-E／DeepFilter 的 delta ~ Uniform(0.2, 2.0) 雜訊縮放公式）；alpha_values 只給單一值時
+  視為固定強度（供 Experiment 2 sweep 用）。
+- Experiment 2 robustness sweep 另外用 robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
+  （對齊 DeepFilter／MECG-E 論文回報的 noise-amplitude 分段）。
 - 支援 controlled_frequencies_hz，例如 0.05、0.1、0.2、0.3、0.5、0.8、1.0 Hz。
 
 4. 訓練與測試
@@ -514,7 +538,13 @@ Early stopping 與模型選擇原則：
 - mambattention_stfrft_ecg 使用與 mambattention_ecg 相同的資料與主要 backbone 參數；核心差異是將 STFT 前處理替換為 learnable STFrFT。
 - 支援 checkpoint、resume、early stopping、loss curves。
 - 訓練結束會評估 PTB-XL fold 10，若 external NPZ 存在也會評估 MIT-BIH、Chapman、CPSC。
-- 目前多數 YAML 仍使用統一 fallback recipe，例如 train_epochs = 50000、batch_size = 96、lr = 1e-4、AdamW、ExponentialLR、early stopping patience = 15。若正式實驗採 paper-faithful fairness，需為每個 baseline 建立或更新對應 recipe config，並確認 train_supervised.py 實際支援該 optimizer/scheduler/selection rule。
+- 目前狀態：fcn_dae、drnn、deepfilter、descod_ecg_1shot/5shot/10shot、mecg_e、eddm 的
+  optimizer/lr/betas/weight_decay/scheduler 已個別對齊各自論文（細節見
+  scripts/check_experiment_config.sh 的 EXPECTED_TRAINING_BY_MODEL），train_supervised.py
+  已支援 Adam/AdamW/RAdam 與 none/StepLR/ExponentialLR/ReduceLROnPlateau。
+  train_epochs = 50000、early_stopping_patience_epochs = 15 則是專案刻意統一的跨 baseline
+  訓練 budget（而非未客製化的 fallback），目的是讓所有模型享有相同訓練預算以維持比較公平性；
+  各自論文若有不同的固定 epoch 數，僅供對照，不再套用於實際訓練設定。
 
 5. Inference
 - 程式：code/inference.py。

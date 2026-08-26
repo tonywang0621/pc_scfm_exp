@@ -53,11 +53,13 @@ EXPECTED = {
     ("dataset", "clean_reference", "bandpass_hz"): [0.05, 40.0],
     ("dataset", "resample_hz"): 250,
     ("dataset", "window_size"): 512,
-    ("dataset", "overlap_ratio"): 0.5,
+    ("dataset", "overlap_ratio"): 0.0,
     ("dataset", "normalization"): "z_score",
     ("dataset", "baseline_wander", "train_source"): "nstdb",
     ("dataset", "baseline_wander", "alpha_mode"): "peak_to_peak_ratio",
-    ("dataset", "baseline_wander", "alpha_values"): [0.05, 0.1, 0.2, 0.3, 0.5],
+    ("dataset", "baseline_wander", "alpha_sampling"): "uniform_range",
+    ("dataset", "baseline_wander", "alpha_values"): [0.2, 2.0],
+    ("dataset", "baseline_wander", "robustness_alpha_values"): [0.2, 0.6, 1.0, 1.5, 2.0],
     ("dataset", "baseline_wander", "controlled_frequencies_hz"): [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0],
     ("dataset", "baseline_wander", "test_types"): [
         "nstdb",
@@ -312,7 +314,7 @@ EXPECTED_BY_MODEL = {
     "eddm": {
         ("model", "dense_channel"): 64,
         ("model", "timesteps"): 50,
-        ("model", "inference_steps"): 50,
+        ("model", "num_shots"): 1,
         ("model", "base_channels"): 64,
         ("model", "channel_mults"): [1, 2, 4, 8],
         ("model", "time_dim"): 256,
@@ -326,25 +328,25 @@ EXPECTED_BY_MODEL = {
     "fir_filter": {
         ("model", "dense_channel"): 64,
         ("model", "filter_kind"): "fir",
-        ("model", "cutoff_hz"): 0.5,
+        ("model", "cutoff_hz"): 0.67,
         ("model", "fir_order"): 56,
         ("model", "fir_window"): "kaiser",
-        ("model", "kaiser_beta"): 8.6,
+        ("model", "kaiser_beta"): 2.18,
         ("model", "zero_phase"): True,
     },
     "iir_filter": {
         ("model", "dense_channel"): 64,
         ("model", "filter_kind"): "iir",
-        ("model", "cutoff_hz"): 0.5,
-        ("model", "iir_order"): 1,
+        ("model", "cutoff_hz"): 0.67,
+        ("model", "iir_order"): 4,
         ("model", "iir_method"): "butterworth",
         ("model", "zero_phase"): True,
     },
     "drnn": {
         ("model", "dense_channel"): 64,
         ("model", "input_size"): 1,
-        ("model", "lstm_hidden_sizes"): [64, 32, 32, 32, 32],
-        ("model", "dense_layers"): [],
+        ("model", "lstm_hidden_sizes"): [64],
+        ("model", "dense_layers"): [64, 64],
         ("model", "output_size"): 1,
         ("model", "dropout"): 0.0,
         ("model", "residual"): False,
@@ -372,10 +374,10 @@ EXPECTED_BY_MODEL = {
         ("model", "output_kernel_size"): 9,
         ("model", "loss_fn"): "ssd+mad",
         ("model", "ssd_weight"): 1.0,
-        ("model", "mad_weight"): 1.0,
+        ("model", "mad_weight"): 50.0,
     },
     "descod_ecg_1shot": {
-        ("model", "feats"): 80,
+        ("model", "feats"): 64,
         ("model", "num_steps"): 50,
         ("model", "beta_start"): 1.0e-4,
         ("model", "beta_end"): 0.5,
@@ -386,7 +388,7 @@ EXPECTED_BY_MODEL = {
         ("model", "loss_fn"): "noise_l1",
     },
     "descod_ecg_5shot": {
-        ("model", "feats"): 80,
+        ("model", "feats"): 64,
         ("model", "num_steps"): 50,
         ("model", "beta_start"): 1.0e-4,
         ("model", "beta_end"): 0.5,
@@ -397,7 +399,7 @@ EXPECTED_BY_MODEL = {
         ("model", "loss_fn"): "noise_l1",
     },
     "descod_ecg_10shot": {
-        ("model", "feats"): 80,
+        ("model", "feats"): 64,
         ("model", "num_steps"): 50,
         ("model", "beta_start"): 1.0e-4,
         ("model", "beta_end"): 0.5,
@@ -409,11 +411,61 @@ EXPECTED_BY_MODEL = {
     },
 }
 
+# Per-model training/dataset overrides. Only keys that differ from the
+# generic EXPECTED training recipe need to be listed here (see
+# check_value's loop: any key present in a model's override dict skips the
+# generic EXPECTED check for that key). A `None` expected value means the
+# key is intentionally absent from that model's training block (e.g. no
+# "gamma" when scheduler is "none" or "ReduceLROnPlateau").
 EXPECTED_TRAINING_BY_MODEL = {
+    "mecg_e": {
+        # MECG-E (Hung et al. 2024): AdamW/lr/betas/scheduler already match
+        # the generic recipe; only weight_decay is paper-specific (matches
+        # AdamW's own default of 1e-2, made explicit here).
+        ("training", "weight_decay"): 1.0e-2,
+    },
+    "eddm": {
+        # EDDM (Li et al. 2025, Section IV-C2): RAdam, lr=1e-5, batch=64, no
+        # LR schedule stated in the paper.
+        ("training", "batch_size"): 64,
+        ("training", "lr"): 1.0e-5,
+        ("training", "optimizer"): "RAdam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "none",
+        ("training", "gamma"): None,
+        ("training", "save_every_epochs"): 50,
+    },
+    "deepfilter": {
+        # DeepFilter (Romero et al. 2021, Section 5.3): Adam, lr=1e-3,
+        # batch=128, ReduceLROnPlateau(factor=0.5, patience=2, min_lr=1e-10).
+        ("training", "batch_size"): 128,
+        ("training", "lr"): 1.0e-3,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "ReduceLROnPlateau",
+        ("training", "gamma"): None,
+        ("training", "factor"): 0.5,
+        ("training", "lr_scheduler_patience_epochs"): 2,
+        ("training", "min_lr"): 1.0e-10,
+        ("training", "save_every_epochs"): 50,
+    },
+    "drnn": {
+        # DRNN (Antczak 2018): Adam, batch=64; paper does not report lr/LR
+        # schedule, so those stay at this project's standard defaults.
+        ("training", "batch_size"): 64,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "none",
+        ("training", "gamma"): None,
+        ("training", "save_every_epochs"): 50,
+        ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
+    },
     "fcn_dae": {
-        ("training", "train_epochs"): 1000,
+        # FCN-DAE: Adam, batch=32, StepLR(step_size=200, gamma=0.5).
         ("training", "batch_size"): 32,
-        ("training", "lr"): 1.0e-4,
         ("training", "optimizer"): "Adam",
         ("training", "betas"): [0.9, 0.999],
         ("training", "weight_decay"): 0.0,
@@ -421,8 +473,39 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "step_size"): 200,
         ("training", "gamma"): 0.5,
         ("training", "save_every_epochs"): 50,
-        ("training", "early_stopping_patience_epochs"): 1000,
         ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
+    },
+    "descod_ecg_1shot": {
+        # DeScoD-ECG (Li et al. 2023, Section IV-C): Adam, lr=1e-3,
+        # StepLR(step_size=150, gamma=0.1).
+        ("training", "lr"): 1.0e-3,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "StepLR",
+        ("training", "step_size"): 150,
+        ("training", "gamma"): 0.1,
+        ("training", "save_every_epochs"): 20,
+    },
+    "descod_ecg_5shot": {
+        ("training", "lr"): 1.0e-3,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "StepLR",
+        ("training", "step_size"): 150,
+        ("training", "gamma"): 0.1,
+        ("training", "save_every_epochs"): 20,
+    },
+    "descod_ecg_10shot": {
+        ("training", "lr"): 1.0e-3,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "StepLR",
+        ("training", "step_size"): 150,
+        ("training", "gamma"): 0.1,
+        ("training", "save_every_epochs"): 20,
     },
 }
 

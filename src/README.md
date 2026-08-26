@@ -659,7 +659,7 @@ python train_supervised.py \
 dataset:
   resample_hz: 250
   window_size: 512
-  overlap_ratio: 0.5
+  overlap_ratio: 0.0
   normalization: z_score
   clean_reference:
     bandpass_hz: [0.05, 40.0]

@@ -13,16 +13,23 @@ log_config: False
 log_model_architecture: False
 
 training:
+  # EDDM paper-faithful recipe (Li et al. 2025, Section IV-C2): RAdam
+  # optimizer, initial lr=1e-5, batch_size=64. The paper does not state an
+  # LR schedule or an epoch/iteration budget for EDDM's own training (only
+  # generic symbols T/M in Algorithm 1). train_epochs /
+  # early_stopping_patience_epochs use this project's unified cross-baseline
+  # training budget (50000 / 15, validation-PCC-driven) per
+  # notes/experiment_實驗設計.txt.
   train_epochs: 50000
-  batch_size: 96
-  lr: 1.0e-4
-  optimizer: AdamW
-  betas: [0.8, 0.99]
-  scheduler: ExponentialLR
-  gamma: 0.99
+  batch_size: 64
+  lr: 1.0e-5
+  optimizer: RAdam
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+  scheduler: none
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
-  save_every_epochs: 5
+  save_every_epochs: 50
   early_stopping_patience_epochs: 15
   early_stopping_min_delta: 1.0e-4
   progress_bar: True
@@ -56,12 +63,21 @@ dataset:
     bandpass_hz: [0.05, 40.0]
   resample_hz: 250
   window_size: 512
-  overlap_ratio: 0.5
+  overlap_ratio: 0.0
   normalization: z_score
   baseline_wander:
     train_source: nstdb
+    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
+    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
+    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
+    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
+    # range. robustness_alpha_values is a separate, discrete grid used only
+    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
+    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_values: [0.05, 0.1, 0.2, 0.3, 0.5]
+    alpha_sampling: uniform_range
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
     test_types:
       - nstdb
@@ -85,8 +101,13 @@ model:
   hop_size: 8
   win_size: 64
   beta: 2
+  # EDDM paper-faithful diffusion setup (Li et al. 2025, Section IV-C2):
+  # T=50 diffusion steps ("consistent with [25]", i.e. DeScoD-ECG). The
+  # reverse process now always runs all T steps (Algorithm 2), so there is
+  # no separate inference_steps to subsample. num_shots=1 is the plain
+  # "EDDM" table entry; set >1 for the paper's "EDDM-k" multifold ensemble.
   timesteps: 50
-  inference_steps: 50
+  num_shots: 1
   base_channels: 64
   channel_mults: [1, 2, 4, 8]
   time_dim: 256

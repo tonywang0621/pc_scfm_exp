@@ -13,16 +13,28 @@ log_config: False
 log_model_architecture: False
 
 training:
+  # DeScoD-ECG paper-faithful recipe (Li et al. 2023, Section IV-C / official
+  # HuayuLiArizona/Score-based-ECG-Denoising utils.py train()): Adam, initial
+  # lr=1e-3, StepLR(step_size=150 epochs, gamma=0.1), batch_size=96.
+  # train_epochs / early_stopping_patience_epochs are set to this project's
+  # unified cross-baseline training budget (50000 / 15) rather than the
+  # paper's own fixed 400-epoch/no-early-stop protocol, per project decision
+  # to give every model the same fixed budget for fairness; the SELECTION
+  # metric stays validation PCC per notes/experiment_實驗設計.txt -- the
+  # best-validation-loss checkpoint is still saved automatically as the
+  # paper-native auxiliary checkpoint.
   train_epochs: 50000
   batch_size: 96
-  lr: 1.0e-4
-  optimizer: AdamW
-  betas: [0.8, 0.99]
-  scheduler: ExponentialLR
-  gamma: 0.99
+  lr: 1.0e-3
+  optimizer: Adam
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+  scheduler: StepLR
+  step_size: 150
+  gamma: 0.1
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
-  save_every_epochs: 5
+  save_every_epochs: 20
   early_stopping_patience_epochs: 15
   early_stopping_min_delta: 1.0e-4
   progress_bar: True
@@ -56,12 +68,21 @@ dataset:
     bandpass_hz: [0.05, 40.0]
   resample_hz: 250
   window_size: 512
-  overlap_ratio: 0.5
+  overlap_ratio: 0.0
   normalization: z_score
   baseline_wander:
     train_source: nstdb
+    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
+    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
+    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
+    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
+    # range. robustness_alpha_values is a separate, discrete grid used only
+    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
+    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_values: [0.05, 0.1, 0.2, 0.3, 0.5]
+    alpha_sampling: uniform_range
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
     test_types:
       - nstdb
@@ -71,7 +92,7 @@ dataset:
   eps: 1.0e-10
 
 model:
-  feats: 80
+  feats: 64  # matches official ConditionalModel default (Score-based-ECG-Denoising repo)
   num_steps: 50
   beta_start: 1.0e-4
   beta_end: 0.5

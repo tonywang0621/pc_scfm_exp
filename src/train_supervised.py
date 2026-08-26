@@ -55,6 +55,14 @@ def _build_optimizer(model, training_args):
             betas=betas,
             weight_decay=weight_decay,
         )
+    if optimizer_name == "radam":
+        # EDDM paper-faithful optimizer (Li et al. 2025, Section IV-C2).
+        return torch.optim.RAdam(
+            model.parameters(),
+            lr=lr,
+            betas=betas,
+            weight_decay=weight_decay,
+        )
     raise ValueError(f"Unsupported optimizer: {training_args.get('optimizer')}")
 
 
@@ -74,7 +82,34 @@ def _build_scheduler(optimizer, training_args):
             step_size=int(training_args.get("step_size", 200)),
             gamma=float(training_args.get("gamma", 0.5)),
         )
+    if scheduler_key in {"reducelronplateau", "plateau"}:
+        # DeepFilter paper-faithful schedule (Romero et al. 2021 / official
+        # fperdigon/DeepFilter train_dl()): halve lr after `patience` epochs
+        # without validation-loss improvement, down to a floor of min_lr.
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=float(training_args.get("factor", 0.5)),
+            patience=int(
+                training_args.get(
+                    "lr_scheduler_patience_epochs", training_args.get("patience", 2)
+                )
+            ),
+            min_lr=float(training_args.get("min_lr", 0.0)),
+        )
     raise ValueError(f"Unsupported scheduler: {training_args.get('scheduler')}")
+
+
+def _scheduler_step(scheduler, metric=None):
+    """Step `scheduler`, routing the validation metric to ReduceLROnPlateau
+    schedulers (which require it) and ignoring it for epoch-based schedulers.
+    No-ops for ReduceLROnPlateau when no fresh metric is available yet.
+    """
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        if metric is not None:
+            scheduler.step(metric)
+        return
+    scheduler.step()
 
 
 def _save_training_state(
@@ -238,7 +273,10 @@ def train():
     logger.info(
         f"Scheduler: {args.training.get('scheduler', 'ExponentialLR')} | "
         f"gamma={args.training.get('gamma', 'n/a')} | "
-        f"step_size={args.training.get('step_size', 'n/a')}"
+        f"step_size={args.training.get('step_size', 'n/a')} | "
+        f"factor={args.training.get('factor', 'n/a')} | "
+        f"lr_scheduler_patience_epochs={args.training.get('lr_scheduler_patience_epochs', 'n/a')} | "
+        f"min_lr={args.training.get('min_lr', 'n/a')}"
     )
     if args.get("log_model_architecture", False):
         logger.info("\n"+"-"*30+"Model Architecture"+"-"*30+"\n")
@@ -552,9 +590,9 @@ def train():
                     running_train_loss = 0
                     running_train_steps = 0
                     model.train()
-                    scheduler.step()
+                    _scheduler_step(scheduler, avg_val_loss)
                 elif epoch_finished:
-                    scheduler.step()
+                    _scheduler_step(scheduler)
 
                 if save_every_steps and current_step % save_every_steps == 0:
                     torch.save(model.state_dict(), checkpoint_dir / f'model_step_{current_step}.pt')

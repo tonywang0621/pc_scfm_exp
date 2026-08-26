@@ -102,7 +102,13 @@ class _DeepFilterBlock(nn.Module):
 
 @register_model("deepfilter")
 class DeepFilterDenoiser(nn.Module):
-    """PyTorch port of the official DeepFilter multibranch LANL-dilated model."""
+    """PyTorch port of the official DeepFilter multibranch LANL-dilated model.
+
+    Loss (Romero et al. 2021, Eq. 2 / official fperdigon/DeepFilter
+    combined_ssd_mad_loss): mad_weight defaults to the paper's empirically
+    found balance term lambda=50, and the MAD term is squared error at the
+    point of maximum deviation (see compute_loss).
+    """
 
     def __init__(
         self,
@@ -116,7 +122,7 @@ class DeepFilterDenoiser(nn.Module):
         output_kernel_size=9,
         loss_fn="ssd+mad",
         ssd_weight=1.0,
-        mad_weight=1.0,
+        mad_weight=50.0,
         **kwargs,
     ):
         super().__init__()
@@ -201,5 +207,8 @@ class DeepFilterDenoiser(nn.Module):
         if "ssd" in self.loss_terms:
             loss = loss + self.ssd_weight * squared_error.sum(dim=(1, 2)).mean()
         if "mad" in self.loss_terms:
-            loss = loss + self.mad_weight * error.abs().amax(dim=(1, 2)).mean()
+            # Paper Eq. (2) / official repo's combined_ssd_mad_loss: the MAD term
+            # is the *squared* error at the point of maximum deviation, i.e.
+            # max(error^2) == max(|error|)^2, not the unsquared max(|error|).
+            loss = loss + self.mad_weight * squared_error.amax(dim=(1, 2)).mean()
         return loss

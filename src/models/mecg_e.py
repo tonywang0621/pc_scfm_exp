@@ -1034,7 +1034,12 @@ class MECGECore(nn.Module):
             max_loss = abs_error.topk(topk, dim=-1).values.mean(dim=-1)
             loss = loss + max_loss.mean() * self.h.get("lambda_max", 0.05)
         if "com" in self.loss_fn:
-            loss_com = F.mse_loss(clean_com, restored_com, reduction="none") * 2
+            # Paper Eq.(9) Lcpx = E[||Yc - X̂c||^2]: Yc is the clean spectrum,
+            # X̂c is the network's directly predicted complex spectrum (com_g),
+            # NOT the spectrum re-computed from the ISTFT'd output audio
+            # (restored_com) -- that comparison is Lcon, computed just below.
+            # Matches official khhungg/MECG-E: F.mse_loss(clean_com, com_g).
+            loss_com = F.mse_loss(clean_com, com_g, reduction="none") * 2
             loss = loss + 0.5 * (loss_com / norm_factor.unsqueeze(-1)).mean()
         if "con" in self.loss_fn:
             loss_con = F.mse_loss(com_g, restored_com, reduction="none") * 2

@@ -56,12 +56,21 @@ dataset:
     bandpass_hz: [0.05, 40.0]
   resample_hz: 250
   window_size: 512
-  overlap_ratio: 0.5
+  overlap_ratio: 0.0
   normalization: z_score
   baseline_wander:
     train_source: nstdb
+    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
+    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
+    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
+    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
+    # range. robustness_alpha_values is a separate, discrete grid used only
+    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
+    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_values: [0.05, 0.1, 0.2, 0.3, 0.5]
+    alpha_sampling: uniform_range
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
     test_types:
       - nstdb
@@ -85,9 +94,25 @@ model:
   hop_size: 8
   win_size: 64
   beta: 2
+  # FIR design: Kaiser window, cutoff 0.67 Hz (AHA-recommended high-pass,
+  # matching the DeepFilter paper's, Romero et al. 2021 Section 5.2, chosen
+  # cutoff) and beta=2.18 (DeepFilter's Kaiser beta, which only depends on
+  # the target stopband attenuation of 30.5 dB and is independent of order).
+  # order is deliberately NOT the paper's literal 8079: that needs a
+  # filtfilt padlen of 3*8079=24237 samples, far larger than this project's
+  # shared dataset.window_size=512 that every model must be compatible
+  # with -- at order=8079, `_ClassicalECGFilter._filter_1d()` would
+  # silently fall back from filtfilt to signal.lfilter (causal, NOT
+  # zero-phase) every single window, defeating zero_phase=True entirely
+  # (per-project decision, see conversation with user). order=56 instead
+  # keeps padlen=168 comfortably under 512 so zero_phase=True genuinely
+  # takes effect, and independently matches the empirically best FIR order
+  # found for ECG BLW removal by the other reference paper in this repo
+  # (docs/fir_iir_filter.pdf, Sravan Kumar et al.: "Kaiser window order 56
+  # ... showing high performance").
   filter_kind: fir
-  cutoff_hz: 0.5
+  cutoff_hz: 0.67
   fir_order: 56
   fir_window: kaiser
-  kaiser_beta: 8.6
+  kaiser_beta: 2.18
   zero_phase: True

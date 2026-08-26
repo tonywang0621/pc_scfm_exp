@@ -77,7 +77,13 @@ def load_npz(path):
     clean = as_single_lead(data[clean_key]) if clean_key else None
     if clean is not None and len(clean) != len(noisy):
         raise ValueError(f"clean length {len(clean)} does not match noisy length {len(noisy)}.")
-    return noisy, clean
+
+    record_ids = None
+    if "record_id" in data:
+        record_ids = [str(value) for value in data["record_id"].tolist()]
+        if len(record_ids) != len(noisy):
+            raise ValueError(f"record_id length {len(record_ids)} does not match noisy length {len(noisy)}.")
+    return noisy, clean, record_ids
 
 
 def run_inference(model, noisy, device, batch_size):
@@ -100,14 +106,23 @@ def load_model_checkpoint(model, checkpoint_path, device):
         model.load_state_dict(checkpoint)
 
 
-def metric_rows(noisy, restored, clean, fs, low_freq_hz, eps):
+def metric_rows(noisy, restored, clean, fs, low_freq_hz, eps, record_ids=None):
     noisy_2d = np.squeeze(noisy, axis=1)
     restored_2d = np.squeeze(restored, axis=1)
     lf_reduction = low_frequency_power_reduction(
         noisy_2d, restored_2d, fs=fs, high_hz=low_freq_hz, eps=eps
     )
 
-    rows = [{"window_index": idx, "LF_Reduction_dB": float(value)} for idx, value in enumerate(lf_reduction)]
+    def row_id_fields(idx):
+        fields = {"window_index": idx}
+        if record_ids is not None:
+            fields["record_id"] = record_ids[idx]
+        return fields
+
+    rows = [
+        {**row_id_fields(idx), "LF_Reduction_dB": float(value)}
+        for idx, value in enumerate(lf_reduction)
+    ]
     if clean is None:
         summary = {
             "LF_Reduction_dB": {
@@ -136,7 +151,7 @@ def metric_rows(noisy, restored, clean, fs, low_freq_hz, eps):
 
     rows = []
     for idx in range(len(noisy_2d)):
-        row = {"window_index": idx}
+        row = row_id_fields(idx)
         for key, values in metric_values.items():
             row[key] = float(values[idx]) if not np.isnan(values[idx]) else ""
         rows.append(row)
@@ -167,7 +182,10 @@ def write_outputs(output_dir, noisy, restored, clean, rows, summary, has_referen
         arrays["clean_reference"] = clean
     np.savez(output_dir / "restored_ecg.npz", **arrays)
 
-    fieldnames = ["window_index"] + [key for key in METRIC_DISPLAY if key in rows[0]]
+    fieldnames = ["window_index"]
+    if "record_id" in rows[0]:
+        fieldnames.append("record_id")
+    fieldnames += [key for key in METRIC_DISPLAY if key in rows[0]]
     write_csv(output_dir / "metrics_per_window.csv", rows, fieldnames)
 
     summary_rows = []
@@ -219,7 +237,7 @@ def main():
     device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
     output_dir = Path(args.output_dir)
 
-    noisy, clean = load_npz(args.input)
+    noisy, clean, record_ids = load_npz(args.input)
     model = get_model(cfg.model_name, **OmegaConf.to_container(cfg.model, resolve=True)).to(device)
     load_model_checkpoint(model, args.checkpoint, device)
     restored = run_inference(model, noisy, device=device, batch_size=args.batch_size)
@@ -231,7 +249,7 @@ def main():
         else cfg.get("evaluation", {}).get("low_frequency_high_hz", 0.5)
     )
     eps = cfg.dataset.get("eps", 1e-10)
-    rows, summary, has_reference = metric_rows(noisy, restored, clean, fs, low_freq_hz, eps)
+    rows, summary, has_reference = metric_rows(noisy, restored, clean, fs, low_freq_hz, eps, record_ids)
     write_outputs(output_dir, noisy, restored, clean, rows, summary, has_reference)
     print_summary(summary, has_reference)
     print(f"saved restored ECG and metric tables to: {output_dir}")

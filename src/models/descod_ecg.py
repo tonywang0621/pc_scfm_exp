@@ -93,7 +93,7 @@ class Bridge(nn.Module):
 
 
 class ConditionalScoreModel(nn.Module):
-    def __init__(self, feats=80, dilations=(1, 2, 4, 2, 1)):
+    def __init__(self, feats=64, dilations=(1, 2, 4, 2, 1)):
         super().__init__()
         feats = int(feats)
         self.stream_x = nn.ModuleList(
@@ -132,7 +132,7 @@ class ConditionalScoreModel(nn.Module):
 class DeScoDDDPM(nn.Module):
     def __init__(
         self,
-        feats=80,
+        feats=64,
         num_steps=50,
         beta_start=1.0e-4,
         beta_end=0.5,
@@ -251,9 +251,22 @@ class DeScoDDDPM(nn.Module):
 @register_model("descod_ecg_5shot")
 @register_model("descod_ecg_10shot")
 class DeScoDECGDenoiser(nn.Module):
+    """DeScoD-ECG conditional score-based diffusion denoiser (Li et al. 2023).
+
+    Defaults follow the official implementation (HuayuLiArizona/Score-based-ECG-
+    Denoising): feats=64, dilations=(1,2,4,2,1), T=50 diffusion steps, quad beta
+    schedule (beta_start=1e-4, beta_end=0.5, matching paper Eq. 10-11), and an
+    L1 noise-prediction loss with sum reduction. Note the paper's Eq. (12) states
+    the loss as squared L2, but the official released code trains with
+    nn.L1Loss(reduction='sum') -- this implementation follows the code.
+    num_shots controls the self-ensemble average size (Eq. 13); num_shots=1 is a
+    single reverse-diffusion sample with no averaging, per
+    notes/experiment_實驗設計.txt.
+    """
+
     def __init__(
         self,
-        feats=80,
+        feats=64,
         num_steps=50,
         beta_start=1.0e-4,
         beta_end=0.5,

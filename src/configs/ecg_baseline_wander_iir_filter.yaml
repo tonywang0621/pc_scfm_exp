@@ -56,12 +56,21 @@ dataset:
     bandpass_hz: [0.05, 40.0]
   resample_hz: 250
   window_size: 512
-  overlap_ratio: 0.5
+  overlap_ratio: 0.0
   normalization: z_score
   baseline_wander:
     train_source: nstdb
+    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
+    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
+    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
+    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
+    # range. robustness_alpha_values is a separate, discrete grid used only
+    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
+    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_values: [0.05, 0.1, 0.2, 0.3, 0.5]
+    alpha_sampling: uniform_range
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
     test_types:
       - nstdb
@@ -85,8 +94,18 @@ model:
   hop_size: 8
   win_size: 64
   beta: 2
+  # IIR paper-faithful design: aligned to the DeepFilter paper's (Romero
+  # et al. 2021, Section 5.2) IIR baseline -- order=4, Butterworth,
+  # bi-directional (zero-phase), cutoff 0.67 Hz (same AHA-recommended
+  # high-pass cutoff used for its FIR baseline; the paper does not
+  # re-state the cutoff in the IIR paragraph, this is inferred from "both
+  # filters" sharing the design). This order is small enough that
+  # filtfilt's padlen (~12 samples) fits comfortably within this
+  # project's dataset.window_size=512, so zero_phase=True actually takes
+  # effect here (unlike the FIR baseline's order=8079 -- see
+  # ecg_baseline_wander_fir_filter.yaml for that unresolved caveat).
   filter_kind: iir
-  cutoff_hz: 0.5
-  iir_order: 1
+  cutoff_hz: 0.67
+  iir_order: 4
   iir_method: butterworth
   zero_phase: True

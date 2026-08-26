@@ -13,16 +13,32 @@ log_config: False
 log_model_architecture: False
 
 training:
+  # DeepFilter paper-faithful recipe (Romero et al. 2021, Section 5.3 /
+  # official fperdigon/DeepFilter train_dl()): Adam, initial lr=1e-3,
+  # ReduceLROnPlateau (factor=0.5, patience=2 epochs on validation loss,
+  # floor min_lr=1e-10), batch_size=128.
+  # Note: the paper's own text says batch_size=32, but the official training
+  # function (train_dl) that actually produced the paper's results uses
+  # batch_size=128 -- batch_size=32 there only appears in test_dl() for
+  # inference batching. We follow the training code (128).
+  # train_epochs / early_stopping_patience_epochs are set to this project's
+  # unified cross-baseline training budget (50000 / 15) rather than the
+  # paper's own epoch cap and EarlyStopping(patience=10), per project
+  # decision to give every model the same fixed budget for fairness; the
+  # SELECTION metric stays validation PCC per notes/experiment_實驗設計.txt.
   train_epochs: 50000
-  batch_size: 96
-  lr: 1.0e-4
-  optimizer: AdamW
-  betas: [0.8, 0.99]
-  scheduler: ExponentialLR
-  gamma: 0.99
+  batch_size: 128
+  lr: 1.0e-3
+  optimizer: Adam
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+  scheduler: ReduceLROnPlateau
+  factor: 0.5
+  lr_scheduler_patience_epochs: 2
+  min_lr: 1.0e-10
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
-  save_every_epochs: 5
+  save_every_epochs: 50
   early_stopping_patience_epochs: 15
   early_stopping_min_delta: 1.0e-4
   progress_bar: True
@@ -56,12 +72,21 @@ dataset:
     bandpass_hz: [0.05, 40.0]
   resample_hz: 250
   window_size: 512
-  overlap_ratio: 0.5
+  overlap_ratio: 0.0
   normalization: z_score
   baseline_wander:
     train_source: nstdb
+    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
+    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
+    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
+    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
+    # range. robustness_alpha_values is a separate, discrete grid used only
+    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
+    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_values: [0.05, 0.1, 0.2, 0.3, 0.5]
+    alpha_sampling: uniform_range
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
     test_types:
       - nstdb
@@ -93,6 +118,9 @@ model:
   dilation: 3
   dropout: 0.4
   output_kernel_size: 9
+  # DeepFilter paper-faithful loss (Eq. 2 / official combined_ssd_mad_loss):
+  # L = ssd_weight * sum(error^2) + mad_weight * max(error^2); mad_weight is
+  # the paper's empirically found balance term lambda=50.
   loss_fn: "ssd+mad"
   ssd_weight: 1.0
-  mad_weight: 1.0
+  mad_weight: 50.0

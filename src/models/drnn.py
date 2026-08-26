@@ -10,15 +10,26 @@ except ImportError:
 
 @register_model("drnn")
 class DRNNDenoiser(nn.Module):
-    """Deep recurrent denoising network following Antczak's DRNN layout."""
+    """Deep recurrent denoising network following Antczak's DRNN layout.
+
+    Architecture-only baseline: Antczak (2018) reports the best-performing
+    network as a single 64-unit LSTM layer, followed by two 64-unit ReLU
+    dense layers, followed by one linear output layer (Fig. 5 / Section
+    3.1). That is the default configuration below. The paper's synthetic
+    (dynamical-model) pretraining + real-data fine-tuning protocol is not
+    reproduced here -- this baseline is trained end-to-end on the project's
+    unified PTB-XL train / multi-dataset test split and preprocessing, per
+    the "DRNN architecture-only baseline" option in
+    notes/experiment_實驗設計.txt.
+    """
 
     def __init__(
         self,
         input_size=1,
-        lstm_hidden_sizes=(64, 32, 32, 32, 32),
+        lstm_hidden_sizes=(64,),
         hidden_size=None,
         lstm_layers=None,
-        dense_layers=(),
+        dense_layers=(64, 64),
         dropout=0.0,
         residual=False,
         output_size=1,

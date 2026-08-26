@@ -315,6 +315,7 @@ def synthetic_baseline(kind, length, fs, rng, frequencies):
 def contaminate(clean, cfg, noise_pool, rng, test_kind=None):
     bw_cfg = cfg["dataset"].get("baseline_wander", {})
     alpha_values = [float(x) for x in bw_cfg.get("alpha_values", [0.1])]
+    alpha_sampling = str(bw_cfg.get("alpha_sampling", "discrete")).lower()
     frequencies = [float(x) for x in bw_cfg.get("controlled_frequencies_hz", [0.1, 0.2, 0.3, 0.5])]
     kind = test_kind or bw_cfg.get("train_source", "nstdb")
 
@@ -326,8 +327,25 @@ def contaminate(clean, cfg, noise_pool, rng, test_kind=None):
         baseline = synthetic_baseline(kind, len(clean), cfg["dataset"]["resample_hz"], rng, frequencies)
 
     baseline = baseline - np.mean(baseline)
-    baseline = baseline / (np.max(np.abs(baseline)) + 1e-8)
-    alpha = float(rng.choice(alpha_values))
+    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
+    # scaling: lambda = delta * ptp(clean) / ptp(noise), i.e. normalize the
+    # noise by its own peak-to-peak range (not peak absolute value) before
+    # scaling it to a fraction `delta` of the clean ECG's peak-to-peak range.
+    baseline = baseline / (np.ptp(baseline) + 1e-8)
+
+    if len(alpha_values) <= 1:
+        # A single fixed value (e.g. one controlled robustness-sweep
+        # condition passed via --alpha-values) is applied deterministically,
+        # regardless of alpha_sampling.
+        alpha = float(alpha_values[0]) if alpha_values else 0.1
+    elif alpha_sampling in {"uniform_range", "range", "continuous"}:
+        # MECG-E/DeepFilter draw delta ~ Uniform(0.2, 2.0) continuously per
+        # sample; alpha_values = [low, high] gives the sampling bounds.
+        low, high = min(alpha_values), max(alpha_values)
+        alpha = float(rng.uniform(low, high))
+    else:
+        alpha = float(rng.choice(alpha_values))
+
     amplitude = np.ptp(clean) if bw_cfg.get("alpha_mode", "peak_to_peak_ratio") == "peak_to_peak_ratio" else 1.0
     return (clean + alpha * amplitude * baseline).astype(np.float32)
 
@@ -354,7 +372,39 @@ def split_name_for_record(record_path, metadata, dataset_name, split_cfg):
     raise ValueError(f"Unexpected PTB-XL fold {fold} for {record_path}.")
 
 
-def save_split(path, clean_windows, noisy_windows, folds=None):
+# MIT-BIH Arrhythmia Database's own documentation notes that records 201
+# and 202 come from the same (male) subject -- the only known same-patient
+# duplicate among this project's external test sets' standard record
+# numbering, so it is corrected here rather than left to a filename-based
+# record_id (which would otherwise treat 201/202 as two different patients).
+KNOWN_SAME_PATIENT_ALIASES = {
+    "mit_bih": {"202": "201"},
+}
+
+
+def record_id_for(record_path, dataset_name, row):
+    """Best-effort patient/record identifier for record-level or
+    patient-level statistical aggregation downstream (see result_analysis.py
+    paired-stats --group-by record).
+
+    - PTB-XL: one patient can have multiple ECG records, so prefer the real
+      `patient_id` from metadata (ptbxl_database.csv) when available.
+    - External sets (MIT-BIH/Chapman/CPSC/QTDB): these are one-record-per-
+      patient in their standard distributions, so the record filename itself
+      is used as the identifier, with a small known-alias table for MIT-BIH's
+      documented 201/202 same-patient exception.
+    """
+    if row:
+        for key in ("patient_id", "subject_id", "patient"):
+            value = row.get(key)
+            if value not in (None, ""):
+                return f"patient_{value}"
+    stem = record_path.stem
+    alias = KNOWN_SAME_PATIENT_ALIASES.get(dataset_name, {}).get(stem)
+    return alias or stem
+
+
+def save_split(path, clean_windows, noisy_windows, folds=None, record_ids=None):
     if not clean_windows:
         return
     arrays = {
@@ -363,6 +413,10 @@ def save_split(path, clean_windows, noisy_windows, folds=None):
     }
     if folds:
         arrays["ptbxl_fold"] = np.asarray(folds, dtype=np.int64)
+    if record_ids:
+        # Fixed-width unicode string array; plain np.savez handles this
+        # natively (no allow_pickle needed) since dtype is '<U...', not object.
+        arrays["record_id"] = np.asarray(record_ids)
     np.savez(path, **arrays)
 
 
@@ -420,6 +474,7 @@ def main():
     clean_by_split = {}
     noisy_by_split = {}
     folds_by_split = {}
+    record_ids_by_split = {}
     skipped_records = 0
 
     records = discover_records(args.input_dir)
@@ -449,6 +504,7 @@ def main():
         if row:
             fold_value = row.get("strat_fold") or row.get("fold") or row.get("ptbxl_fold")
             fold = int(float(fold_value)) if fold_value not in {None, ""} else None
+        record_id = record_id_for(record_path, args.dataset_name, row)
 
         for window in make_windows(clean, window_size, overlap_ratio):
             normalized = normalize_window(window, dataset_cfg.get("normalization", "z_score"))
@@ -457,6 +513,7 @@ def main():
             noisy_by_split.setdefault(split_name, []).append(noisy)
             if fold is not None:
                 folds_by_split.setdefault(split_name, []).append(fold)
+            record_ids_by_split.setdefault(split_name, []).append(record_id)
 
     for split_name, clean_windows in clean_by_split.items():
         save_split(
@@ -464,6 +521,7 @@ def main():
             clean_windows,
             noisy_by_split[split_name],
             folds_by_split.get(split_name),
+            record_ids_by_split.get(split_name),
         )
         print(f"saved {split_name}: {len(clean_windows)} windows -> {output_dir / file_map[split_name]}")
     if skipped_records:

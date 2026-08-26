@@ -241,10 +241,39 @@ class EDDMNoiseUNet1d(nn.Module):
 
 @register_model("eddm")
 class EDDMDenoiser(nn.Module):
+    """EDDM dual-path ECG denoising diffusion model (Li et al. 2025, IEEE TIM).
+
+    Implements the paper's dual-path forward process (Eq. 5): x_t = x_0 +
+    alpha_bar_t * e + beta_bar_t * eps, where e = noisy-clean is the fixed
+    colored (ECG) noise for the whole trajectory and eps ~ N(0, I) is
+    resampled per step. Per-step coefficients alpha_t (colored-noise branch)
+    and beta_t (Gaussian branch) both follow the paper's "linear decrease"
+    strategy (Section IV-C2); alpha_t is additionally normalized so that
+    alpha_bar_T = sum(alpha_1..T) = 1, which the paper requires so that the
+    diffusion endpoint x_T equals the noisy ECG plus a small residual
+    Gaussian perturbation (x_T = x_tilde + eps), not pure Gaussian noise as
+    in standard DDPM. beta_t is scaled by `gaussian_scale` since the paper
+    does not give an absolute magnitude for the white-noise branch.
+
+    The reverse process (Algorithm 2 / Eq. 6-7) is a *stochastic* ancestral
+    sampler -- x_{t-1} = x_t - alpha_t*e_hat - (beta_t^2/beta_bar_t)*eps_hat
+    + sigma_t*eps', with posterior variance sigma_t^2 = beta_t^2 *
+    beta_bar_{t-1}^2 / beta_bar_t^2 (Eq. 6) -- unlike a DDIM-style
+    deterministic "predict-x0-then-re-add-noise" shortcut. This stochastic
+    step is what makes the paper's "EDDM-k" multifold ensemble (repeating
+    the reverse process k times and averaging, see `num_shots`) meaningful
+    at all: a deterministic reverse process would produce identical repeats.
+
+    Note: the paper does not have a public reference implementation, so the
+    specific closed-form used to construct linearly-decreasing alpha_t/beta_t
+    (normalized to sum to 1) is this port's best-effort reconstruction of the
+    stated design constraints, not a verified copy of released code.
+    """
+
     def __init__(
         self,
         timesteps=50,
-        inference_steps=50,
+        num_shots=1,
         base_channels=64,
         channel_mults=(1, 2, 4, 8),
         time_dim=256,
@@ -258,7 +287,7 @@ class EDDMDenoiser(nn.Module):
     ):
         super().__init__()
         self.timesteps = int(timesteps)
-        self.inference_steps = int(inference_steps)
+        self.num_shots = max(int(num_shots), 1)
         self.gaussian_scale = float(gaussian_scale)
         self.ecg_noise_weight = float(ecg_noise_weight)
         self.gaussian_noise_weight = float(gaussian_noise_weight)
@@ -281,52 +310,67 @@ class EDDMDenoiser(nn.Module):
             attention_heads=int(attention_heads),
         )
 
-        betas = torch.linspace(1.0e-4, 0.02, self.timesteps)
-        alphas = 1.0 - betas
-        alpha_bars = torch.cumprod(alphas, dim=0)
-        gamma = torch.linspace(0.0, 1.0, self.timesteps)
-        sigma = torch.sqrt(1.0 - alpha_bars) * self.gaussian_scale
-        self.register_buffer("gamma", gamma)
-        self.register_buffer("sigma", sigma)
+        T = self.timesteps
+        step_index = torch.arange(1, T + 1, dtype=torch.float64)
+        # Linearly decreasing positive weights over t=1..T, normalized to
+        # sum to 1 (Eq. 5's alpha_bar_T = 1 requirement).
+        linear_decreasing_weights = (T - step_index + 1) / (T * (T + 1) / 2.0)
+        alpha_t = linear_decreasing_weights.to(torch.float32)
+        beta_t = (self.gaussian_scale * linear_decreasing_weights).to(torch.float32)
 
-    def _coefficients(self, t, length):
-        gamma = self.gamma[t].view(-1, 1, 1)
-        sigma = self.sigma[t].view(-1, 1, 1)
-        return gamma, sigma
+        alpha_bar = torch.cumsum(alpha_t, dim=0)
+        beta_bar = torch.sqrt(torch.cumsum(beta_t.pow(2), dim=0))
+        beta_bar_prev = F.pad(beta_bar[:-1], (1, 0), value=0.0)
+        posterior_var = (
+            beta_t.pow(2) * beta_bar_prev.pow(2) / beta_bar.pow(2).clamp_min(1.0e-12)
+        )
+
+        self.register_buffer("alpha_t", alpha_t)
+        self.register_buffer("beta_t", beta_t)
+        self.register_buffer("alpha_bar", alpha_bar)
+        self.register_buffer("beta_bar", beta_bar)
+        self.register_buffer("posterior_var", posterior_var)
 
     def _predict(self, xt, noisy, t):
         model_input = torch.cat([xt, noisy], dim=1)
-        gamma, sigma = self._coefficients(t, xt.shape[-1])
-        coefficients = torch.cat([gamma.flatten(1), sigma.flatten(1)], dim=1)
+        coefficients = torch.stack([self.alpha_bar[t], self.beta_bar[t]], dim=1)
         return self.ecg_noise_model(model_input, coefficients), self.white_noise_model(model_input, coefficients)
 
-    def _clean_from_prediction(self, xt, t, ecg_noise, gaussian_noise):
-        gamma, sigma = self._coefficients(t, xt.shape[-1])
-        return xt - gamma * ecg_noise - sigma * gaussian_noise
-
     def forward(self, x):
+        squeeze = False
         if x.ndim == 2:
             x = x.unsqueeze(1)
+            squeeze = True
         current = x
-        steps = torch.linspace(
-            self.timesteps - 1,
-            0,
-            steps=max(self.inference_steps, 1),
-            device=x.device,
-        ).round().long().unique(sorted=True).flip(0)
-        for t_value in steps:
-            t = torch.full((x.shape[0],), int(t_value.item()), device=x.device, dtype=torch.long)
-            ecg_noise, gaussian_noise = self._predict(current, x, t)
-            clean = self._clean_from_prediction(current, t, ecg_noise, gaussian_noise)
-            prev_t = max(int(t_value.item()) - 1, 0)
-            prev = torch.full((x.shape[0],), prev_t, device=x.device, dtype=torch.long)
-            prev_gamma, prev_sigma = self._coefficients(prev, x.shape[-1])
-            current = clean + prev_gamma * ecg_noise + prev_sigma * gaussian_noise
-        return current
+        # Algorithm 2 iterates every one of the T diffusion steps -- unlike
+        # DDIM-style samplers, the per-step alpha_t/beta_t coefficients tie
+        # each reverse step to its specific neighbor, so steps cannot be
+        # skipped without breaking Eq. (6)-(7).
+        for t_value in reversed(range(self.timesteps)):
+            t = torch.full((x.shape[0],), t_value, device=x.device, dtype=torch.long)
+            ecg_noise_hat, gaussian_noise_hat = self._predict(current, x, t)
+            alpha_t = self.alpha_t[t].view(-1, 1, 1)
+            beta_t = self.beta_t[t].view(-1, 1, 1)
+            beta_bar_t = self.beta_bar[t].view(-1, 1, 1)
+            sigma_t = self.posterior_var[t].clamp_min(0.0).sqrt().view(-1, 1, 1)
+            noise = torch.randn_like(current) if t_value > 0 else torch.zeros_like(current)
+            # Eq. (7): x_{t-1} = x_t - alpha_t*e_hat - (beta_t^2/beta_bar_t)*eps_hat + sigma_t*eps'
+            current = (
+                current
+                - alpha_t * ecg_noise_hat
+                - (beta_t.pow(2) / beta_bar_t.clamp_min(1.0e-12)) * gaussian_noise_hat
+                + sigma_t * noise
+            )
+        return current.squeeze(1) if squeeze else current
 
     @torch.no_grad()
     def denoising(self, x):
-        return self.forward(x)
+        if self.num_shots <= 1:
+            return self.forward(x)
+        # Paper's "EDDM-k" multifold ensemble (Section IV-C2): average k
+        # independent stochastic reverse-process runs.
+        samples = torch.stack([self.forward(x) for _ in range(self.num_shots)], dim=0)
+        return samples.mean(dim=0)
 
     def compute_loss(self, batch, device, **kwargs):
         noisy, clean = batch[0].to(device), batch[1].to(device)
@@ -340,8 +384,9 @@ class EDDMDenoiser(nn.Module):
         t = torch.randint(0, self.timesteps, (batch_size,), device=device, dtype=torch.long)
         ecg_noise = noisy - clean
         gaussian_noise = torch.randn_like(clean)
-        gamma, sigma = self._coefficients(t, clean.shape[-1])
-        xt = clean + gamma * ecg_noise + sigma * gaussian_noise
+        alpha_bar = self.alpha_bar[t].view(-1, 1, 1)
+        beta_bar = self.beta_bar[t].view(-1, 1, 1)
+        xt = clean + alpha_bar * ecg_noise + beta_bar * gaussian_noise
 
         pred_ecg_noise, pred_gaussian_noise = self._predict(xt, noisy, t)
 
@@ -360,6 +405,8 @@ class EDDMDenoiser(nn.Module):
             ecg_loss = F.mse_loss(pred_ecg_noise, ecg_noise)
             gaussian_loss = F.mse_loss(pred_gaussian_noise, gaussian_noise)
 
+        # Eq. (8): L(theta) = E[||eps - eps_theta||^2] + E[||e - e_theta||^2]
+        # (equal, unweighted combination of the two noise-prediction losses).
         return (
             self.ecg_noise_weight * ecg_loss
             + self.gaussian_noise_weight * gaussian_loss
