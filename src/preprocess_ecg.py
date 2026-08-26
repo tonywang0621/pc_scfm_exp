@@ -190,7 +190,17 @@ def load_record(path):
 def select_lead(ecg, lead="II", lead_names=None):
     ecg = np.asarray(ecg, dtype=np.float32)
     if ecg.ndim == 1:
-        return ecg
+        if not lead_names:
+            raise ValueError(
+                f"Single-lead ECG has no lead metadata, so requested lead {lead!r} cannot be verified."
+            )
+        aliases = LEAD_ALIASES.get(str(lead).lower(), [str(lead).lower()])
+        normalized = [str(name).lower().replace("-", "_") for name in lead_names]
+        if len(normalized) == 1 and normalized[0] in aliases:
+            return ecg
+        raise ValueError(
+            f"Single-lead ECG metadata {list(lead_names)!r} does not verify requested lead {lead!r}."
+        )
     if ecg.ndim != 2:
         raise ValueError(f"Expected ECG record shaped [T], [T, L], or [L, T], got {ecg.shape}.")
 
@@ -207,8 +217,10 @@ def select_lead(ecg, lead="II", lead_names=None):
         raise ValueError(
             f"Requested lead {lead!r} was not found in available leads {list(lead_names)!r}."
         )
-    elif str(lead).upper() == "II" and ecg.shape[1] > 1:
-        return ecg[:, 1]
+    elif not lead_names:
+        raise ValueError(
+            f"ECG has no lead metadata, so requested lead {lead!r} cannot be verified."
+        )
     raise ValueError(
         f"Requested lead {lead!r} was not found and no usable lead names were provided."
     )
