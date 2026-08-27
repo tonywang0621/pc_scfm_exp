@@ -1,6 +1,8 @@
 import argparse
 import csv
 import math
+import shutil
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -162,6 +164,62 @@ def discover_records(input_dir):
     return deduped
 
 
+def is_wfdb_header_date_parse_error(exc):
+    text = str(exc)
+    return "does not match format" in text and "%d/%m/%Y" in text
+
+
+def link_or_copy_for_wfdb(src, dst):
+    try:
+        dst.symlink_to(src)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def rdrecord_with_sanitized_record_line(wfdb, path):
+    path = Path(path)
+    header_path = path if path.suffix.lower() == ".hea" else Path(str(path) + ".hea")
+    record_path = header_path.with_suffix("")
+    if not header_path.exists():
+        raise FileNotFoundError(f"Missing WFDB header: {header_path}")
+
+    lines = header_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    if not lines:
+        raise ValueError(f"Empty WFDB header: {header_path}")
+
+    fields = lines[0].split()
+    if len(fields) < 4:
+        raise ValueError(
+            f"{header_path} has an invalid WFDB record line. Expected at least "
+            "record_name n_sig fs sig_len."
+        )
+
+    try:
+        n_sig = int(fields[1])
+    except ValueError as exc:
+        raise ValueError(f"{header_path} has invalid n_sig in WFDB record line: {fields[1]!r}") from exc
+
+    with tempfile.TemporaryDirectory(prefix="wfdb_header_") as tmp:
+        tmp_dir = Path(tmp)
+        tmp_header = tmp_dir / header_path.name
+        tmp_header.write_text(" ".join(fields[:4]) + "\n" + "".join(lines[1:]), encoding="utf-8")
+
+        linked_files = {tmp_header.name}
+        for line in lines[1 : 1 + n_sig]:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            signal_file = stripped.split()[0]
+            if signal_file == "~" or Path(signal_file).is_absolute() or signal_file in linked_files:
+                continue
+            src = header_path.parent / signal_file
+            if src.exists():
+                link_or_copy_for_wfdb(src, tmp_dir / signal_file)
+                linked_files.add(signal_file)
+
+        return wfdb.rdrecord(str(tmp_dir / record_path.name))
+
+
 def load_record(path):
     path = Path(path)
     if path.suffix.lower() == ".npz":
@@ -192,7 +250,12 @@ def load_record(path):
     except ImportError as exc:
         raise ImportError("WFDB input requires `wfdb`. Install it or convert records to NPZ/CSV.") from exc
 
-    record = wfdb.rdrecord(str(path))
+    try:
+        record = wfdb.rdrecord(str(path))
+    except ValueError as exc:
+        if not is_wfdb_header_date_parse_error(exc):
+            raise
+        record = rdrecord_with_sanitized_record_line(wfdb, path)
     return np.asarray(record.p_signal, dtype=np.float32), float(record.fs), list(record.sig_name)
 
 
