@@ -544,7 +544,10 @@ def main():
         split_name = split_name_for_record(record_path, metadata, args.dataset_name, split_cfg)
         if requested_splits and split_name not in requested_splits:
             continue
-        ecg, fs, leads = load_record(record_path)
+        try:
+            ecg, fs, leads = load_record(record_path)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load ECG record {record_path}") from exc
         fs = args.source_fs if args.source_fs is not None else fs
         if fs is None:
             raise ValueError(
