@@ -24,7 +24,7 @@ SKIP_INFERENCE=0
 SKIP_ROBUSTNESS=0
 SKIP_COMPLEXITY=0
 LIMIT=""
-ALPHA_VALUES="0.05,0.1,0.2,0.3,0.5"
+ALPHA_VALUES="0.2,0.6,1.0,1.5,2.0"
 EXP2_BASELINE_KIND="nstdb"
 DATASETS="ptbxl,mit_bih,chapman,cpsc,qtdb"
 CHECKPOINT_STEP="58080"
@@ -53,7 +53,7 @@ Options:
   --skip-robustness       Do not run robustness strength
   --skip-complexity       Do not run complexity profiling
   --limit N               Limit generated robustness windows for smoke tests
-  --alpha-values CSV      Robustness strength alpha values. Default: 0.05,0.1,0.2,0.3,0.5
+  --alpha-values CSV      Robustness strength alpha values. Default: 0.2,0.6,1.0,1.5,2.0
   --baseline-kind KIND    Robustness baseline kind. Default: nstdb
   --datasets CSV          Datasets to run. Default: ptbxl,mit_bih,chapman,cpsc,qtdb
   --checkpoint-step N     Checkpoint step. Default: 58080

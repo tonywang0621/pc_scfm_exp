@@ -208,7 +208,7 @@ python3 experiment_suite.py exp2-strength \
   --noise-dir ../data/ecg_baseline_wander/raw/NSTDB \
   --checkpoint ../runs/ecg_baseline_wander/checkpoint/ptbxl_lead2_baseline_wander_pc_scfm_rl_no_flow/pc_scfm/best_pcc_model.pt \
   --output-root ../runs/ecg_baseline_wander/controlled_tests/pc_scfm_rl_no_flow \
-  --alpha-values 0.05,0.1,0.2,0.3,0.5
+  --alpha-values 0.2,0.6,1.0,1.5,2.0
 ```
 
 輸出：
@@ -302,7 +302,7 @@ python3 experiment_suite.py exp2-strength \
   --noise-dir ../data/ecg_baseline_wander/raw/NSTDB \
   --checkpoint ../runs/ecg_baseline_wander/checkpoint/ptbxl_lead2_baseline_wander_pc_scfm_rl_no_flow/pc_scfm/best_pcc_model.pt \
   --output-root ../runs/ecg_baseline_wander/controlled_tests/pc_scfm_rl_no_flow \
-  --alpha-values 0.05,0.1,0.2,0.3,0.5
+  --alpha-values 0.2,0.6,1.0,1.5,2.0
 
 python3 experiment_suite.py exp3-frequency \
   --config configs/ecg_baseline_wander_pc_scfm_rl_no_flow.yaml \

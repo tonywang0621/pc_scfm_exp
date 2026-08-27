@@ -107,6 +107,7 @@ def run_preprocess(args, output_dir, baseline_kind, alpha_values, frequencies_hz
         args.split_name,
         "--seed",
         args.seed,
+        "--overwrite",
     ]
     if args.metadata_csv:
         cmd.extend(["--metadata-csv", args.metadata_csv])

@@ -19,12 +19,18 @@ cmd=(
   --input-dir "$RECORDS_DIR"
   --metadata-csv "$METADATA_CSV"
   --dataset-name ptbxl
+  --overwrite
 )
 
 if find "$NOISE_DIR" -type f -print -quit 2>/dev/null | grep -q .; then
   cmd+=(--noise-dir "$NOISE_DIR")
-else
+elif [[ "${ALLOW_SYNTHETIC_FALLBACK:-0}" == "1" ]]; then
+  echo "WARNING: NSTDB is missing; using synthetic random_low_frequency_drift because ALLOW_SYNTHETIC_FALLBACK=1." >&2
   cmd+=(--baseline-kind random_low_frequency_drift)
+else
+  echo "ERROR: NSTDB files are required for MECG-E/EDDM-aligned baseline-wander preprocessing." >&2
+  echo "Place NSTDB records under $NOISE_DIR, or set ALLOW_SYNTHETIC_FALLBACK=1 only for smoke tests." >&2
+  exit 1
 fi
 
 "${cmd[@]}" "$@"

@@ -407,7 +407,7 @@ python3 experiment_suite.py exp2-strength \
   --noise-dir /path/to/nstdb_records \
   --checkpoint /path/to/best_pcc_model.pt \
   --output-root ../runs/ecg_baseline_wander/controlled_tests \
-  --alpha-values 0.05,0.1,0.2,0.3,0.5
+  --alpha-values 0.2,0.6,1.0,1.5,2.0
 ```
 
 Baseline frequency sweep：

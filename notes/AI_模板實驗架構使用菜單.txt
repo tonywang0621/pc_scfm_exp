@@ -155,7 +155,7 @@ Experiment 2：Baseline strength robustness
     --noise-dir /path/to/nstdb_records \
     --checkpoint /path/to/best_pcc_model.pt \
     --output-root /mnt/c/Users/中研院/rl_exp/runs/ecg_baseline_wander/controlled_tests \
-    --alpha-values 0.05,0.1,0.2,0.3,0.5
+    --alpha-values 0.2,0.6,1.0,1.5,2.0
 
 Experiment 3：Baseline frequency robustness
 

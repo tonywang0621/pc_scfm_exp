@@ -301,7 +301,7 @@ python3 experiment_suite.py exp2-strength \
   --noise-dir /mnt/c/Users/中研院/rl_exp/data/ecg_baseline_wander/raw/NSTDB \
   --checkpoint /mnt/c/Users/中研院/rl_exp/runs/ecg_baseline_wander/checkpoint/ptbxl_lead2_baseline_wander_mecg_e/mecg_e/best_pcc_model.pt \
   --output-root /mnt/c/Users/中研院/rl_exp/runs/ecg_baseline_wander/controlled_tests/mecg_e \
-  --alpha-values 0.05,0.1,0.2,0.3,0.5
+  --alpha-values 0.2,0.6,1.0,1.5,2.0
 ```
 
 MambAttention：
@@ -314,7 +314,7 @@ python3 experiment_suite.py exp2-strength \
   --noise-dir /mnt/c/Users/中研院/rl_exp/data/ecg_baseline_wander/raw/NSTDB \
   --checkpoint /mnt/c/Users/中研院/rl_exp/runs/ecg_baseline_wander/checkpoint/ptbxl_lead2_baseline_wander_mambattention/mambattention_ecg/best_pcc_model.pt \
   --output-root /mnt/c/Users/中研院/rl_exp/runs/ecg_baseline_wander/controlled_tests/mambattention \
-  --alpha-values 0.05,0.1,0.2,0.3,0.5
+  --alpha-values 0.2,0.6,1.0,1.5,2.0
 ```
 
 輸出：
@@ -490,4 +490,3 @@ PSD / spectrogram
 4. MambAttention 在 external datasets 是否仍穩定。
 5. MambAttention 的效能提升是否值得額外參數量、FLOPs、inference time。
 ```
-

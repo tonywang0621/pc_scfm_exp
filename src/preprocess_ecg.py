@@ -296,18 +296,26 @@ def load_noise_pool(noise_dir, target_fs, window_size, seed, shuffle=True):
         return []
     rng = np.random.default_rng(seed)
     pool = []
+    failures = []
     for path in discover_records(noise_dir):
         try:
             ecg, fs, leads = load_record(path)
-            fs = fs or target_fs
+            if fs is None:
+                raise ValueError(
+                    f"{path} has no sampling-rate metadata. Convert it to WFDB/NPZ with fs, "
+                    "or preprocess with an NSTDB source that carries fs metadata."
+                )
             lead = select_lead(ecg, lead="II", lead_names=leads)
             lead = resample_ecg(lead, fs, target_fs)
             for window in make_windows(lead, window_size, overlap_ratio=0.0):
                 centered = window - np.mean(window)
                 if np.std(centered) > 1e-8:
                     pool.append(centered.astype(np.float32))
-        except Exception:
-            continue
+        except Exception as exc:
+            failures.append(f"{path}: {exc}")
+    if not pool and failures:
+        detail = "\n".join(failures[:10])
+        raise ValueError(f"No usable NSTDB noise windows were loaded. First failures:\n{detail}")
     if shuffle:
         rng.shuffle(pool)
     return pool
@@ -358,6 +366,12 @@ def contaminate(clean, cfg, noise_pool, rng, test_kind=None, baseline_override=N
         baseline = noise_pool[int(rng.integers(0, len(noise_pool)))]
         if len(baseline) != len(clean):
             baseline = signal.resample(baseline, len(clean)).astype(np.float32)
+    elif kind == "nstdb":
+        raise ValueError(
+            "baseline_wander.train_source is nstdb, but no NSTDB noise windows are available. "
+            "Provide --noise-dir with usable NSTDB records; do not fall back to synthetic noise "
+            "for the main experiment."
+        )
     else:
         baseline = synthetic_baseline(kind, len(clean), cfg["dataset"]["resample_hz"], rng, frequencies)
 
@@ -480,18 +494,18 @@ def main():
     output_splits = requested_splits or (
         {"train", "val", "test"} if args.dataset_name == "ptbxl" else {args.dataset_name}
     )
-    existing_splits = set()
-    if not args.overwrite:
-        existing_splits = {
-            split_name
-            for split_name in output_splits
-            if split_name in file_map and (output_dir / file_map[split_name]).exists()
-        }
-    for split_name in sorted(existing_splits):
-        print(f"skipping existing {split_name}: {output_dir / file_map[split_name]}")
-    if existing_splits == output_splits:
-        print("all requested output files already exist; nothing to preprocess.")
-        return
+    existing_splits = {
+        split_name
+        for split_name in output_splits
+        if split_name in file_map and (output_dir / file_map[split_name]).exists()
+    }
+    if existing_splits and not args.overwrite:
+        existing_paths = ", ".join(str(output_dir / file_map[split]) for split in sorted(existing_splits))
+        raise FileExistsError(
+            "Preprocessed split files already exist, and reusing stale NPZ files can violate "
+            f"the experiment design: {existing_paths}. Re-run with --overwrite after confirming "
+            "the source data, NSTDB noise, split, and alpha settings."
+        )
 
     rng = np.random.default_rng(args.seed)
     metadata = read_metadata(args.metadata_csv)
@@ -508,6 +522,13 @@ def main():
         args.seed,
         shuffle=noise_sampling not in {"sequential", "cyclic", "deepfilter"},
     )
+    if str(bw_cfg.get("train_source", "nstdb")).lower() == "nstdb" and not noise_pool:
+        raise FileNotFoundError(
+            "baseline_wander.train_source is nstdb, but --noise-dir was not provided or produced "
+            "no usable NSTDB windows. This experiment design requires NSTDB baseline wander; "
+            "use --baseline-kind sinusoidal/multi_sine/random_low_frequency_drift only for "
+            "controlled robustness experiments."
+        )
     noise_index = 0
 
     clean_by_split = {}
@@ -515,7 +536,6 @@ def main():
     folds_by_split = {}
     record_ids_by_split = {}
     skipped_records = 0
-
     records = discover_records(args.input_dir)
     if args.limit:
         records = records[: args.limit]
@@ -524,11 +544,13 @@ def main():
         split_name = split_name_for_record(record_path, metadata, args.dataset_name, split_cfg)
         if requested_splits and split_name not in requested_splits:
             continue
-        if split_name in existing_splits:
-            continue
-
         ecg, fs, leads = load_record(record_path)
-        fs = float(args.source_fs or fs or target_fs)
+        fs = args.source_fs if args.source_fs is not None else fs
+        if fs is None:
+            raise ValueError(
+                f"{record_path} has no sampling-rate metadata. Provide --source-fs or use WFDB/NPZ input with fs."
+            )
+        fs = float(fs)
         try:
             lead = select_lead(ecg, lead=dataset_cfg.get("lead", "II"), lead_names=leads)
         except ValueError as exc:
@@ -568,8 +590,7 @@ def main():
         )
         print(f"saved {split_name}: {len(clean_windows)} windows -> {output_dir / file_map[split_name]}")
     if skipped_records:
-        print(f"skipped {skipped_records} records because the requested lead was unavailable.")
-
+        print(f"skipped {skipped_records} records because the requested lead could not be verified.")
 
 if __name__ == "__main__":
     main()

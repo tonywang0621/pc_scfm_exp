@@ -21,7 +21,8 @@ FORCE=1
 RUN_EXP2=1
 RUN_EXP3=1
 LIMIT=""
-ALPHA_VALUES="0.05,0.1,0.2,0.3,0.5"
+SKIP_MISSING=0
+ALPHA_VALUES="0.2,0.6,1.0,1.5,2.0"
 FREQUENCIES_HZ="0.05,0.1,0.2,0.3,0.5,0.8,1.0"
 FREQUENCY_ALPHA="0.2"
 EXP2_BASELINE_KIND="nstdb"
@@ -41,12 +42,13 @@ Default behavior overwrites same-name Experiment 2/3 outputs.
 
 Options:
   --skip-existing       Skip an experiment when its summary.csv already exists
+  --skip-missing        Skip missing checkpoints/datasets instead of failing
   --only-exp2           Run Experiment 2 only
   --only-exp3           Run Experiment 3 only
   --batch-size N        Inference batch size. Default: 64
   --device DEVICE       Passed to experiment_suite.py, e.g. cuda:0 or cpu. Default: auto
   --limit N             Limit generated test windows, useful for smoke tests
-  --alpha-values CSV    Exp2 alpha values. Default: 0.05,0.1,0.2,0.3,0.5
+  --alpha-values CSV    Exp2 alpha values. Default: 0.2,0.6,1.0,1.5,2.0
   --frequencies-hz CSV  Exp3 frequencies. Default: 0.05,0.1,0.2,0.3,0.5,0.8,1.0
   --frequency-alpha A   Exp3 alpha value. Default: 0.2
   --datasets CSV        Datasets to run. Default: ptbxl,mit_bih,chapman,cpsc,qtdb
@@ -74,6 +76,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-existing)
       FORCE=0
+      shift
+      ;;
+    --skip-missing)
+      SKIP_MISSING=1
       shift
       ;;
     --only-exp2)
@@ -133,13 +139,29 @@ done
 source "$ROOT_DIR/scripts/experiment_models.sh"
 
 checkpoint_for() {
-  local exp_name="$1"
-  local model_dir="$2"
+  local config="$1"
+  local exp_name="$2"
+  local model_dir="$3"
   if [[ "$model_dir" == "fir_filter" || "$model_dir" == "iir_filter" ]]; then
     printf '%s\n' "__classical_filter_no_checkpoint__"
     return 0
   fi
-  printf '%s\n' "$RUN_ROOT/checkpoint/$exp_name/$model_dir/best_pcc_model.pt"
+  local selection_metric
+  selection_metric="$(
+    python3 - "$config" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    cfg = yaml.safe_load(f) or {}
+print(str((cfg.get("training") or {}).get("selection_metric", "val_pcc")).lower())
+PY
+  )"
+  if [[ "$selection_metric" == "val_loss" ]]; then
+    printf '%s\n' "$RUN_ROOT/checkpoint/$exp_name/$model_dir/best_model.pt"
+  else
+    printf '%s\n' "$RUN_ROOT/checkpoint/$exp_name/$model_dir/best_pcc_model.pt"
+  fi
 }
 
 model_selected() {
@@ -269,12 +291,20 @@ run_exp2_if_available() {
   local summary="$output_root/exp2_strength/$dataset_label/summary.csv"
 
   if [[ "$checkpoint" != "__classical_filter_no_checkpoint__" && ! -f "$checkpoint" ]]; then
-    echo "SKIP exp2: $model_key: missing checkpoint $checkpoint"
-    return 0
+    if [[ "$SKIP_MISSING" -eq 1 ]]; then
+      echo "SKIP exp2: $model_key: missing checkpoint $checkpoint"
+      return 0
+    fi
+    echo "ERROR exp2: $model_key: missing checkpoint $checkpoint" >&2
+    exit 1
   fi
   if [[ "$EXP2_BASELINE_KIND" == "nstdb" ]] && ! have_nstdb; then
-    echo "SKIP exp2: $model_key: missing NSTDB files under $NOISE_DIR"
-    return 0
+    if [[ "$SKIP_MISSING" -eq 1 ]]; then
+      echo "SKIP exp2: $model_key: missing NSTDB files under $NOISE_DIR"
+      return 0
+    fi
+    echo "ERROR exp2: $model_key: missing NSTDB files under $NOISE_DIR" >&2
+    exit 1
   fi
   if [[ "$FORCE" -eq 0 && -f "$summary" ]]; then
     echo "SKIP exp2: $model_key: existing $summary"
@@ -305,8 +335,12 @@ run_exp3_if_available() {
   local summary="$output_root/exp3_frequency/$dataset_label/summary.csv"
 
   if [[ "$checkpoint" != "__classical_filter_no_checkpoint__" && ! -f "$checkpoint" ]]; then
-    echo "SKIP exp3: $model_key: missing checkpoint $checkpoint"
-    return 0
+    if [[ "$SKIP_MISSING" -eq 1 ]]; then
+      echo "SKIP exp3: $model_key: missing checkpoint $checkpoint"
+      return 0
+    fi
+    echo "ERROR exp3: $model_key: missing checkpoint $checkpoint" >&2
+    exit 1
   fi
   if [[ "$FORCE" -eq 0 && -f "$summary" ]]; then
     echo "SKIP exp3: $model_key: existing $summary"
@@ -329,18 +363,26 @@ for item in "${EXPERIMENT_MODELS[@]}"; do
   if ! model_selected "$model_key"; then
     continue
   fi
-  checkpoint="$(checkpoint_for "$exp_name" "$model_dir")"
+  checkpoint="$(checkpoint_for "$config" "$exp_name" "$model_dir")"
 
   IFS=',' read -ra requested_datasets <<< "$DATASETS"
   for dataset in "${requested_datasets[@]}"; do
     dataset="${dataset//[[:space:]]/}"
     if ! mapfile -t ds_args < <(dataset_args "$dataset"); then
-      echo "SKIP dataset: $dataset: missing raw data"
-      continue
+      if [[ "$SKIP_MISSING" -eq 1 ]]; then
+        echo "SKIP dataset: $dataset: missing raw data"
+        continue
+      fi
+      echo "ERROR dataset: $dataset: missing raw data" >&2
+      exit 1
     fi
     if [[ "${#ds_args[@]}" -lt 5 ]]; then
-      echo "SKIP dataset: $dataset: missing raw data"
-      continue
+      if [[ "$SKIP_MISSING" -eq 1 ]]; then
+        echo "SKIP dataset: $dataset: missing raw data"
+        continue
+      fi
+      echo "ERROR dataset: $dataset: missing raw data" >&2
+      exit 1
     fi
     dataset_name="${ds_args[0]}"
     dataset_label="${ds_args[1]}"

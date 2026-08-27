@@ -12,6 +12,7 @@ DEVICE=""
 FORCE=1
 SKIP_INFERENCE=0
 SKIP_STATS=0
+SKIP_MISSING=0
 CORRECTION="holm"
 METRICS="SSD,MAD,PRD,CosSim,SNR_Improvement_dB,LF_Reduction_dB,R_Peak_Timing_Error_ms,RR_Interval_MAE_ms,QRS_Amplitude_Error"
 
@@ -21,11 +22,12 @@ Usage:
   bash scripts/run_available_inference_and_stats.sh [options]
 
 Runs inference for every model in scripts/experiment_models.sh when both:
-  1. best_pcc_model.pt exists
+  1. the config-selected checkpoint exists (best_model.pt for val_loss,
+     best_pcc_model.pt for val_pcc; fixed filters need no checkpoint)
   2. the requested processed dataset NPZ exists
 
-Then runs paired statistics against the baseline model for every dataset where
-both models have metrics_per_window.csv.
+Then runs record-level paired statistics against the baseline model for every
+dataset where both models have metrics_per_window.csv.
 
 Options:
   --baseline NAME       Baseline model key from experiment_models.sh. Default: mecge
@@ -33,6 +35,7 @@ Options:
   --device DEVICE       Passed to inference.py, e.g. cuda:0 or cpu. Default: auto
   --force              Re-run inference/statistics even if output files exist. Default behavior
   --skip-existing      Skip existing outputs
+  --skip-missing       Skip missing checkpoints/datasets instead of failing
   --skip-inference      Only run statistics from existing inference outputs
   --skip-stats          Only run inference
   --correction METHOD   none, bonferroni, or holm. Default: holm
@@ -61,6 +64,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-existing)
       FORCE=0
+      shift
+      ;;
+    --skip-missing)
+      SKIP_MISSING=1
       shift
       ;;
     --skip-inference)
@@ -102,9 +109,29 @@ DATASETS=(
 )
 
 checkpoint_for() {
-  local exp_name="$1"
-  local model_dir="$2"
-  printf '%s\n' "$RUN_ROOT/checkpoint/$exp_name/$model_dir/best_pcc_model.pt"
+  local config="$1"
+  local exp_name="$2"
+  local model_dir="$3"
+  if [[ "$model_dir" == "fir_filter" || "$model_dir" == "iir_filter" ]]; then
+    printf '%s\n' "__classical_filter_no_checkpoint__"
+    return 0
+  fi
+  local selection_metric
+  selection_metric="$(
+    python3 - "$config" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    cfg = yaml.safe_load(f) or {}
+print(str((cfg.get("training") or {}).get("selection_metric", "val_pcc")).lower())
+PY
+  )"
+  if [[ "$selection_metric" == "val_loss" ]]; then
+    printf '%s\n' "$RUN_ROOT/checkpoint/$exp_name/$model_dir/best_model.pt"
+  else
+    printf '%s\n' "$RUN_ROOT/checkpoint/$exp_name/$model_dir/best_pcc_model.pt"
+  fi
 }
 
 inference_dir_for() {
@@ -123,16 +150,24 @@ run_inference_if_available() {
 
   local checkpoint
   local output_dir
-  checkpoint="$(checkpoint_for "$exp_name" "$model_dir")"
+  checkpoint="$(checkpoint_for "$config" "$exp_name" "$model_dir")"
   output_dir="$(inference_dir_for "$model_key" "$dataset_key")"
 
-  if [[ ! -f "$checkpoint" ]]; then
-    echo "SKIP inference: $model_key / $dataset_key: missing checkpoint $checkpoint"
-    return 0
+  if [[ "$checkpoint" != "__classical_filter_no_checkpoint__" && ! -f "$checkpoint" ]]; then
+    if [[ "$SKIP_MISSING" -eq 1 ]]; then
+      echo "SKIP inference: $model_key / $dataset_key: missing checkpoint $checkpoint"
+      return 0
+    fi
+    echo "ERROR inference: $model_key / $dataset_key: missing checkpoint $checkpoint" >&2
+    exit 1
   fi
   if [[ ! -f "$dataset_path" ]]; then
-    echo "SKIP inference: $model_key / $dataset_key: missing dataset $dataset_path"
-    return 0
+    if [[ "$SKIP_MISSING" -eq 1 ]]; then
+      echo "SKIP inference: $model_key / $dataset_key: missing dataset $dataset_path"
+      return 0
+    fi
+    echo "ERROR inference: $model_key / $dataset_key: missing dataset $dataset_path" >&2
+    exit 1
   fi
   if [[ "$FORCE" -eq 0 && -f "$output_dir/metrics_per_window.csv" ]]; then
     echo "SKIP inference: $model_key / $dataset_key: existing $output_dir/metrics_per_window.csv"
@@ -176,12 +211,20 @@ run_stats_if_available() {
   output_csv="$RUN_ROOT/statistics/${BASELINE_MODEL}_vs_${candidate_key}_${dataset_key}.csv"
 
   if [[ ! -f "$baseline_csv" ]]; then
-    echo "SKIP stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: missing $baseline_csv"
-    return 0
+    if [[ "$SKIP_MISSING" -eq 1 ]]; then
+      echo "SKIP stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: missing $baseline_csv"
+      return 0
+    fi
+    echo "ERROR stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: missing $baseline_csv" >&2
+    exit 1
   fi
   if [[ ! -f "$candidate_csv" ]]; then
-    echo "SKIP stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: missing $candidate_csv"
-    return 0
+    if [[ "$SKIP_MISSING" -eq 1 ]]; then
+      echo "SKIP stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: missing $candidate_csv"
+      return 0
+    fi
+    echo "ERROR stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: missing $candidate_csv" >&2
+    exit 1
   fi
   if [[ "$FORCE" -eq 0 && -f "$output_csv" ]]; then
     echo "SKIP stats: $BASELINE_MODEL vs $candidate_key / $dataset_key: existing $output_csv"
@@ -195,7 +238,8 @@ run_stats_if_available() {
     --candidate "$candidate_csv" \
     --output "$output_csv" \
     --metrics "$METRICS" \
-    --correction "$CORRECTION"
+    --correction "$CORRECTION" \
+    --group-by record
 }
 
 cd "$APP_DIR"
