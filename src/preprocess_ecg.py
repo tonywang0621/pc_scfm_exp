@@ -206,6 +206,44 @@ def infer_wfdb_signal_length(header_path, signal_lines, n_sig):
     return 5000
 
 
+def signal_file_for_header(header_path):
+    candidates = [
+        header_path.with_suffix(".mat").name,
+        header_path.with_suffix(".dat").name,
+        header_path.stem + ".mat",
+        header_path.stem + ".dat",
+    ]
+    for candidate in candidates:
+        if (header_path.parent / candidate).exists():
+            return candidate
+    return header_path.stem + ".dat"
+
+
+def looks_like_signal_line(line):
+    fields = line.split()
+    return len(fields) >= 9 and (
+        fields[0].endswith(".dat")
+        or fields[0].endswith(".mat")
+        or fields[0] == "~"
+    )
+
+
+def sanitize_mixed_record_signal_line(header_path, mixed_line, following_lines):
+    fields = mixed_line.split()
+    templates = [line.split() for line in following_lines if looks_like_signal_line(line)]
+
+    if len(fields) >= 10 and templates:
+        template = templates[0]
+        signal_fields = [*template[:5], *fields[6:]]
+        return " ".join(signal_fields) + "\n"
+
+    signal_file = signal_file_for_header(header_path)
+    if len(fields) >= 10:
+        signal_fields = [signal_file, "16+24", "1000/mV", fields[4], fields[5], *fields[6:]]
+        return " ".join(signal_fields) + "\n"
+    return mixed_line
+
+
 def rdrecord_with_sanitized_record_line(wfdb, path):
     path = Path(path)
     header_path = path if path.suffix.lower() == ".hea" else Path(str(path) + ".hea")
@@ -233,7 +271,8 @@ def rdrecord_with_sanitized_record_line(wfdb, path):
         signal_lines = lines[1:]
         sig_len = fields[3]
     else:
-        signal_lines = lines
+        first_signal_line = sanitize_mixed_record_signal_line(header_path, lines[0], lines[1:])
+        signal_lines = [first_signal_line, *lines[1:]]
         sig_len = str(infer_wfdb_signal_length(header_path, signal_lines[:n_sig], n_sig))
 
     with tempfile.TemporaryDirectory(prefix="wfdb_header_") as tmp:
