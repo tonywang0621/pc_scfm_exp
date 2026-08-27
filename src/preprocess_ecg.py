@@ -176,6 +176,36 @@ def link_or_copy_for_wfdb(src, dst):
         shutil.copy2(src, dst)
 
 
+def is_int_field(value):
+    try:
+        int(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def infer_wfdb_signal_length(header_path, signal_lines, n_sig):
+    for line in signal_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        fields = stripped.split()
+        if len(fields) < 2:
+            continue
+        signal_file = fields[0]
+        if signal_file == "~" or Path(signal_file).is_absolute():
+            continue
+        src = header_path.parent / signal_file
+        if not src.exists():
+            continue
+        fmt = fields[1].split("x", 1)[0].split(":", 1)[0].split("+", 1)[0]
+        bytes_per_sample = {"16": 2, "80": 1, "212": 1.5}.get(fmt)
+        if bytes_per_sample is None:
+            continue
+        return int(src.stat().st_size / (bytes_per_sample * n_sig))
+    return 5000
+
+
 def rdrecord_with_sanitized_record_line(wfdb, path):
     path = Path(path)
     header_path = path if path.suffix.lower() == ".hea" else Path(str(path) + ".hea")
@@ -199,14 +229,21 @@ def rdrecord_with_sanitized_record_line(wfdb, path):
     except ValueError as exc:
         raise ValueError(f"{header_path} has invalid n_sig in WFDB record line: {fields[1]!r}") from exc
 
+    if is_int_field(fields[3]):
+        signal_lines = lines[1:]
+        sig_len = fields[3]
+    else:
+        signal_lines = lines
+        sig_len = str(infer_wfdb_signal_length(header_path, signal_lines[:n_sig], n_sig))
+
     with tempfile.TemporaryDirectory(prefix="wfdb_header_") as tmp:
         tmp_dir = Path(tmp)
         tmp_header = tmp_dir / header_path.name
-        sanitized_fields = [tmp_header.stem, *fields[1:4]]
-        tmp_header.write_text(" ".join(sanitized_fields) + "\n" + "".join(lines[1:]), encoding="utf-8")
+        sanitized_fields = [tmp_header.stem, fields[1], fields[2], sig_len]
+        tmp_header.write_text(" ".join(sanitized_fields) + "\n" + "".join(signal_lines), encoding="utf-8")
 
         linked_files = {tmp_header.name}
-        for line in lines[1 : 1 + n_sig]:
+        for line in signal_lines[:n_sig]:
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
