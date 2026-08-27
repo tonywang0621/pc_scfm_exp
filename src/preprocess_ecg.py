@@ -1,8 +1,6 @@
 import argparse
 import csv
 import math
-import shutil
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -164,146 +162,6 @@ def discover_records(input_dir):
     return deduped
 
 
-def is_wfdb_header_date_parse_error(exc):
-    text = str(exc)
-    return "does not match format" in text and "%d/%m/%Y" in text
-
-
-def link_or_copy_for_wfdb(src, dst):
-    try:
-        dst.symlink_to(src)
-    except OSError:
-        shutil.copy2(src, dst)
-
-
-def is_int_field(value):
-    try:
-        int(value)
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
-def infer_wfdb_signal_length(header_path, signal_lines, n_sig):
-    for line in signal_lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        fields = stripped.split()
-        if len(fields) < 2:
-            continue
-        signal_file = fields[0]
-        if signal_file == "~" or Path(signal_file).is_absolute():
-            continue
-        src = header_path.parent / signal_file
-        if not src.exists():
-            continue
-        fmt = fields[1].split("x", 1)[0].split(":", 1)[0].split("+", 1)[0]
-        bytes_per_sample = {"16": 2, "80": 1, "212": 1.5}.get(fmt)
-        if bytes_per_sample is None:
-            continue
-        return int(src.stat().st_size / (bytes_per_sample * n_sig))
-    return 5000
-
-
-def signal_file_for_header(header_path):
-    candidates = [
-        header_path.with_suffix(".mat").name,
-        header_path.with_suffix(".dat").name,
-        header_path.stem + ".mat",
-        header_path.stem + ".dat",
-    ]
-    for candidate in candidates:
-        if (header_path.parent / candidate).exists():
-            return candidate
-    return header_path.stem + ".dat"
-
-
-def looks_like_signal_line(line):
-    fields = line.split()
-    return len(fields) >= 9 and (
-        fields[0].endswith(".dat")
-        or fields[0].endswith(".mat")
-        or fields[0] == "~"
-    )
-
-
-def sanitize_mixed_record_signal_line(header_path, mixed_line, following_lines):
-    fields = mixed_line.split()
-    templates = [line.split() for line in following_lines if looks_like_signal_line(line)]
-
-    if len(fields) >= 10 and templates:
-        template = templates[0]
-        signal_fields = [*template[:5], *fields[6:]]
-        return " ".join(signal_fields) + "\n"
-
-    signal_file = signal_file_for_header(header_path)
-    if len(fields) >= 10:
-        signal_fields = [signal_file, "16+24", "1000/mV", fields[4], fields[5], *fields[6:]]
-        return " ".join(signal_fields) + "\n"
-    return mixed_line
-
-
-def rdrecord_with_sanitized_record_line(wfdb, path):
-    path = Path(path)
-    header_path = path if path.suffix.lower() == ".hea" else Path(str(path) + ".hea")
-    record_path = header_path.with_suffix("")
-    if not header_path.exists():
-        raise FileNotFoundError(f"Missing WFDB header: {header_path}")
-
-    lines = header_path.read_text(encoding="utf-8").splitlines(keepends=True)
-    if not lines:
-        raise ValueError(f"Empty WFDB header: {header_path}")
-
-    fields = lines[0].split()
-    if len(fields) < 4:
-        raise ValueError(
-            f"{header_path} has an invalid WFDB record line. Expected at least "
-            "record_name n_sig fs sig_len."
-        )
-
-    try:
-        n_sig = int(fields[1])
-    except ValueError as exc:
-        raise ValueError(f"{header_path} has invalid n_sig in WFDB record line: {fields[1]!r}") from exc
-
-    if is_int_field(fields[3]):
-        signal_lines = lines[1:]
-        sig_len = fields[3]
-    else:
-        first_signal_line = sanitize_mixed_record_signal_line(header_path, lines[0], lines[1:])
-        signal_lines = [first_signal_line, *lines[1:]]
-        sig_len = str(infer_wfdb_signal_length(header_path, signal_lines[:n_sig], n_sig))
-
-    with tempfile.TemporaryDirectory(prefix="wfdb_header_") as tmp:
-        tmp_dir = Path(tmp)
-        tmp_header = tmp_dir / header_path.name
-        sanitized_fields = [tmp_header.stem, fields[1], fields[2], sig_len]
-        tmp_header.write_text(" ".join(sanitized_fields) + "\n" + "".join(signal_lines), encoding="utf-8")
-
-        linked_files = {tmp_header.name}
-        for line in signal_lines[:n_sig]:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            signal_file = stripped.split()[0]
-            if signal_file == "~" or Path(signal_file).is_absolute() or signal_file in linked_files:
-                continue
-            src = header_path.parent / signal_file
-            if src.exists():
-                link_or_copy_for_wfdb(src, tmp_dir / signal_file)
-                linked_files.add(signal_file)
-
-        try:
-            return wfdb.rdrecord(str(tmp_dir / record_path.name))
-        except ValueError as exc:
-            raise ValueError(
-                f"WFDB fallback also failed for {header_path}. "
-                f"Original record line was: {lines[0].strip()!r}. "
-                f"Sanitized record line was: {' '.join(sanitized_fields)!r}."
-            ) from exc
-
-
 def load_record(path):
     path = Path(path)
     if path.suffix.lower() == ".npz":
@@ -334,12 +192,7 @@ def load_record(path):
     except ImportError as exc:
         raise ImportError("WFDB input requires `wfdb`. Install it or convert records to NPZ/CSV.") from exc
 
-    try:
-        record = wfdb.rdrecord(str(path))
-    except ValueError as exc:
-        if not is_wfdb_header_date_parse_error(exc):
-            raise
-        record = rdrecord_with_sanitized_record_line(wfdb, path)
+    record = wfdb.rdrecord(str(path))
     return np.asarray(record.p_signal, dtype=np.float32), float(record.fs), list(record.sig_name)
 
 
