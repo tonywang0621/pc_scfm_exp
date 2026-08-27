@@ -21,12 +21,9 @@ training:
   # function (train_dl) that actually produced the paper's results uses
   # batch_size=128 -- batch_size=32 there only appears in test_dl() for
   # inference batching. We follow the training code (128).
-  # train_epochs / early_stopping_patience_epochs are set to this project's
-  # unified cross-baseline training budget (50000 / 15) rather than the
-  # paper's own epoch cap and EarlyStopping(patience=10), per project
-  # decision to give every model the same fixed budget for fairness; the
-  # SELECTION metric stays validation PCC per notes/experiment_實驗設計.txt.
-  train_epochs: 50000
+  # Paper/official-code selection uses validation loss with EarlyStopping
+  # patience=10. Dataset split remains this project's fixed benchmark.
+  train_epochs: 100000
   batch_size: 128
   lr: 1.0e-3
   optimizer: Adam
@@ -35,12 +32,14 @@ training:
   scheduler: ReduceLROnPlateau
   factor: 0.5
   lr_scheduler_patience_epochs: 2
+  lr_scheduler_min_delta: 0.05
   min_lr: 1.0e-10
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 50
-  early_stopping_patience_epochs: 15
-  early_stopping_min_delta: 1.0e-4
+  early_stopping_patience_epochs: 10
+  early_stopping_min_delta: 0.05
+  selection_metric: val_loss
   progress_bar: True
   resume: False
   resume_checkpoint: null
@@ -51,6 +50,7 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
+  processed_data_dir: "${data_dir}/processed/deepfilter"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -70,10 +70,10 @@ dataset:
     filter_order: 4
     zero_phase: True
     bandpass_hz: [0.05, 40.0]
-  resample_hz: 250
+  resample_hz: 360
   window_size: 512
   overlap_ratio: 0.0
-  normalization: z_score
+  normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
     # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
@@ -84,7 +84,8 @@ dataset:
     # by Experiment 2 (exp2-strength sweep controlled conditions), matching
     # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_sampling: uniform_range
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
     alpha_values: [0.2, 2.0]
     robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
@@ -96,20 +97,6 @@ dataset:
   eps: 1.0e-10
 
 model:
-  fea: "pha"
-  norm: False
-  dense_channel: 64
-  compress_factor: 0.3
-  num_tscblocks: 4
-  d_state: 16
-  d_conv: 4
-  expand: 4
-  norm_epsilon: 1.0e-5
-  sampling_rate: 250
-  n_fft: 64
-  hop_size: 8
-  win_size: 64
-  beta: 2
   input_channels: 1
   layers: [64, 64, 32, 32, 16, 16]
   dilated_pattern: [False, True, False, True, False, True]

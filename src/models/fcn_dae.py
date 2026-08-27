@@ -77,8 +77,9 @@ class FCNDAEDenoiser(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        if loss_fn != "mse":
-            raise ValueError("FCNDAEDenoiser currently supports only model.loss_fn='mse'.")
+        if loss_fn not in {"mse", "ssd"}:
+            raise ValueError("FCNDAEDenoiser currently supports model.loss_fn='mse' or 'ssd'.")
+        self.loss_fn = str(loss_fn)
         if len(encoder_channels) != len(encoder_strides):
             raise ValueError("encoder_channels and encoder_strides must have the same length.")
         if len(decoder_channels) != len(decoder_strides):
@@ -152,6 +153,8 @@ class FCNDAEDenoiser(nn.Module):
         if valid_mask is not None:
             valid_mask = valid_mask.to(device=device, dtype=loss.dtype)
             loss = (loss * valid_mask).sum() / valid_mask.sum().clamp_min(1.0)
+        elif self.loss_fn == "ssd":
+            loss = loss.sum(dim=(1, 2)).mean()
         else:
             loss = loss.mean()
         return loss

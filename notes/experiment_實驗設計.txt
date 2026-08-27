@@ -542,7 +542,7 @@ Early stopping 與模型選擇原則：
   optimizer/lr/betas/weight_decay/scheduler 已個別對齊各自論文（細節見
   scripts/check_experiment_config.sh 的 EXPECTED_TRAINING_BY_MODEL），train_supervised.py
   已支援 Adam/AdamW/RAdam 與 none/StepLR/ExponentialLR/ReduceLROnPlateau。
-  train_epochs = 50000、early_stopping_patience_epochs = 15 則是專案刻意統一的跨 baseline
+  train_epochs = 50000、early_stopping_patience_epochs = 20 則是專案刻意統一的跨 baseline
   訓練 budget（而非未客製化的 fallback），目的是讓所有模型享有相同訓練預算以維持比較公平性；
   各自論文若有不同的固定 epoch 數，僅供對照，不再套用於實際訓練設定。
 

@@ -13,25 +13,25 @@ log_config: False
 log_model_architecture: False
 
 training:
-  # FCN-DAE paper-faithful recipe: Adam + MSE with step decay.
-  # The common PTB-XL/QTDB/MIT-BIH/Chapman/CPSC benchmark data below is kept fixed.
-  # train_epochs / early_stopping_patience_epochs use this project's unified
-  # cross-baseline training budget (50000 / 15, validation-PCC-driven) per
-  # notes/experiment_實驗設計.txt.
-  train_epochs: 50000
-  batch_size: 32
-  lr: 1.0e-4
+  # DeepFilter official comparison recipe for FCN-DAE: Adam(lr=1e-3),
+  # SSD loss, batch_size=128, ReduceLROnPlateau + EarlyStopping on val_loss.
+  train_epochs: 100000
+  batch_size: 128
+  lr: 1.0e-3
   optimizer: Adam
   betas: [0.9, 0.999]
   weight_decay: 0.0
-  scheduler: StepLR
-  step_size: 200
-  gamma: 0.5
+  scheduler: ReduceLROnPlateau
+  factor: 0.5
+  lr_scheduler_patience_epochs: 2
+  lr_scheduler_min_delta: 0.05
+  min_lr: 1.0e-10
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 50
-  early_stopping_patience_epochs: 15
-  early_stopping_min_delta: 1.0e-4
+  early_stopping_patience_epochs: 10
+  early_stopping_min_delta: 0.05
+  selection_metric: val_loss
   progress_bar: True
   resume: False
   resume_checkpoint: null
@@ -42,6 +42,7 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
+  processed_data_dir: "${data_dir}/processed/fcn_dae"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -61,10 +62,10 @@ dataset:
     filter_order: 4
     zero_phase: True
     bandpass_hz: [0.05, 40.0]
-  resample_hz: 250
+  resample_hz: 360
   window_size: 512
   overlap_ratio: 0.0
-  normalization: z_score
+  normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
     # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
@@ -75,7 +76,8 @@ dataset:
     # by Experiment 2 (exp2-strength sweep controlled conditions), matching
     # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_sampling: uniform_range
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
     alpha_values: [0.2, 2.0]
     robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
@@ -87,24 +89,10 @@ dataset:
   eps: 1.0e-10
 
 model:
-  fea: "pha"
-  norm: False
-  dense_channel: 64
-  compress_factor: 0.3
-  num_tscblocks: 4
-  d_state: 16
-  d_conv: 4
-  expand: 4
-  norm_epsilon: 1.0e-5
-  sampling_rate: 250
-  n_fft: 64
-  hop_size: 8
-  win_size: 64
-  beta: 2
   input_channels: 1
   kernel_size: 16
   encoder_channels: [40, 20, 20, 20, 40, 1]
   encoder_strides: [2, 2, 2, 2, 2, 1]
   decoder_channels: [1, 40, 20, 20, 20, 40, 1]
   decoder_strides: [1, 2, 2, 2, 2, 2, 1]
-  loss_fn: "mse"
+  loss_fn: "ssd"

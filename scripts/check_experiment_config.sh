@@ -35,7 +35,7 @@ EXPECTED = {
     ("training", "eval_every_epochs"): 1,
     ("training", "validation_metrics_every_epochs"): 1,
     ("training", "save_every_epochs"): 5,
-    ("training", "early_stopping_patience_epochs"): 15,
+    ("training", "early_stopping_patience_epochs"): 20,
     ("training", "early_stopping_min_delta"): 1.0e-4,
     ("training", "resume"): False,
     ("training", "resume_checkpoint"): None,

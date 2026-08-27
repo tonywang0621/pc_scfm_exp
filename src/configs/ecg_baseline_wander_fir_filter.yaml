@@ -23,7 +23,7 @@ training:
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 5
-  early_stopping_patience_epochs: 15
+  early_stopping_patience_epochs: 20
   early_stopping_min_delta: 1.0e-4
   progress_bar: True
   resume: False
@@ -35,6 +35,7 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
+  processed_data_dir: "${data_dir}/processed/fir_filter"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -54,10 +55,10 @@ dataset:
     filter_order: 4
     zero_phase: True
     bandpass_hz: [0.05, 40.0]
-  resample_hz: 250
+  resample_hz: 360
   window_size: 512
   overlap_ratio: 0.0
-  normalization: z_score
+  normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
     # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
@@ -68,7 +69,8 @@ dataset:
     # by Experiment 2 (exp2-strength sweep controlled conditions), matching
     # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
     alpha_mode: peak_to_peak_ratio
-    alpha_sampling: uniform_range
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
     alpha_values: [0.2, 2.0]
     robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
@@ -80,39 +82,23 @@ dataset:
   eps: 1.0e-10
 
 model:
-  fea: "pha"
-  norm: False
-  dense_channel: 64
-  compress_factor: 0.3
-  num_tscblocks: 4
-  d_state: 16
-  d_conv: 4
-  expand: 4
-  norm_epsilon: 1.0e-5
-  sampling_rate: 250
-  n_fft: 64
-  hop_size: 8
-  win_size: 64
-  beta: 2
+  sampling_rate: 360
   # FIR design: Kaiser window, cutoff 0.67 Hz (AHA-recommended high-pass,
   # matching the DeepFilter paper's, Romero et al. 2021 Section 5.2, chosen
   # cutoff) and beta=2.18 (DeepFilter's Kaiser beta, which only depends on
   # the target stopband attenuation of 30.5 dB and is independent of order).
-  # order is deliberately NOT the paper's literal 8079: that needs a
-  # filtfilt padlen of 3*8079=24237 samples, far larger than this project's
-  # shared dataset.window_size=512 that every model must be compatible
-  # with -- at order=8079, `_ClassicalECGFilter._filter_1d()` would
-  # silently fall back from filtfilt to signal.lfilter (causal, NOT
-  # zero-phase) every single window, defeating zero_phase=True entirely
-  # (per-project decision, see conversation with user). order=56 instead
-  # keeps padlen=168 comfortably under 512 so zero_phase=True genuinely
-  # takes effect, and independently matches the empirically best FIR order
-  # found for ECG BLW removal by the other reference paper in this repo
-  # (docs/fir_iir_filter.pdf, Sravan Kumar et al.: "Kaiser window order 56
-  # ... showing high performance").
+  # Strict DeepFilter official-code FIR setting: kaiserord design with
+  # factor=4.5, transition width=0.07 Hz, filtfilt mirror/constant padding for
+  # short 512-sample beats, followed by the optional 150 Hz low-pass stage.
   filter_kind: fir
   cutoff_hz: 0.67
-  fir_order: 56
+  fir_design: kaiserord
+  fir_order: 8079
   fir_window: kaiser
   kaiser_beta: 2.18
+  kaiser_factor: 4.5
+  transition_width_hz: 0.07
   zero_phase: True
+  allow_causal_fallback: False
+  short_signal_mode: deepfilter_pad
+  post_lowpass_hz: 150.0

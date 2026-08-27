@@ -80,6 +80,20 @@ class ECGBaselineWanderDataset(Dataset):
             raise ValueError(
                 f"noisy and clean arrays must have the same length, got {len(self.noisy)} and {len(self.clean)}."
             )
+        expected_window_size = kwargs.get("window_size")
+        if expected_window_size is not None:
+            expected_window_size = int(expected_window_size)
+            observed_window_size = int(self.noisy.shape[-1])
+            if observed_window_size != expected_window_size:
+                raise ValueError(
+                    f"{split_path} has ECG windows of length {observed_window_size}, "
+                    f"but dataset.window_size={expected_window_size}. Re-run preprocess_ecg.py "
+                    "for this model-specific config, or point dataset.processed_data_dir to the correct NPZ files."
+                )
+        if self.clean.shape[-1] != self.noisy.shape[-1]:
+            raise ValueError(
+                f"noisy and clean window lengths must match, got {self.noisy.shape[-1]} and {self.clean.shape[-1]}."
+            )
         teacher_key = kwargs.get("teacher_prediction_key")
         self.teacher = None
         if teacher_key and teacher_key in loaded:

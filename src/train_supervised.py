@@ -90,6 +90,8 @@ def _build_scheduler(optimizer, training_args):
             optimizer,
             mode="min",
             factor=float(training_args.get("factor", 0.5)),
+            threshold=float(training_args.get("lr_scheduler_min_delta", training_args.get("min_delta", 1.0e-4))),
+            threshold_mode="abs",
             patience=int(
                 training_args.get(
                     "lr_scheduler_patience_epochs", training_args.get("patience", 2)
@@ -359,10 +361,15 @@ def train():
     training_state_ckpt = checkpoint_dir / 'training_state.pt'
     skip_training = not bool(getattr(model, "requires_training", True))
 
+    selection_metric = str(args.training.get("selection_metric", "val_pcc")).lower()
+    if selection_metric not in {"val_pcc", "val_loss"}:
+        raise ValueError("training.selection_metric must be 'val_pcc' or 'val_loss'.")
     patience = args.training.get(
         'early_stopping_patience_epochs',
         args.training.get('early_stopping_patience', 8),
     )
+    early_stopping_enabled = patience not in {None, False, "none", "None", "null", "Null", 0}
+    patience = int(patience) if early_stopping_enabled else 0
     min_delta = float(args.training.get('early_stopping_min_delta', 0.0))
     patience_counter = 0
     stop_training = False
@@ -409,7 +416,7 @@ def train():
         val_pccs = list(state.get("val_pccs", val_pccs))
         val_metric_history = list(state.get("val_metric_history", val_metric_history))
         logger.info(f"Resumed training from {resume_checkpoint} at step {step}.")
-        if patience_counter >= patience:
+        if early_stopping_enabled and patience_counter >= patience:
             logger.info(
                 f"Resume checkpoint already reached early stopping patience "
                 f"({patience_counter}/{patience}); skipping training and running final evaluation."
@@ -531,23 +538,29 @@ def train():
                             for key, value in val_metrics.items():
                                 writer.add_scalar(f'Val/{key}', value, current_step)
 
-                    # Primary selection and early stopping use validation PCC only.
-                    if avg_val_pcc > best_val_pcc + min_delta:
+                    pcc_improved = avg_val_pcc > best_val_pcc + min_delta
+                    loss_improved = avg_val_loss is not None and avg_val_loss < best_val_loss - min_delta
+
+                    if pcc_improved:
                         logger.info(f'New best val PCC {avg_val_pcc:.4f} at epoch {current_epoch}! Saving model...')
                         best_val_pcc = avg_val_pcc
                         torch.save(model.state_dict(), best_pcc_model_ckpt)
-                        patience_counter = 0
-                    else:
-                        patience_counter += 1
-                        logger.info(f'No PCC improvement. Patience: {patience_counter}/{patience}')
 
-                    # Save best validation-loss checkpoint for auxiliary analysis only.
-                    if avg_val_loss is not None and avg_val_loss < best_val_loss:
+                    if loss_improved:
                         logger.info(f'New best val loss {avg_val_loss:.4f} at epoch {current_epoch}! Saving model...')
                         best_val_loss = avg_val_loss
                         torch.save(model.state_dict(), best_model_ckpt)
 
-                    if patience_counter >= patience:
+                    primary_improved = pcc_improved if selection_metric == "val_pcc" else loss_improved
+                    if primary_improved:
+                        patience_counter = 0
+                    elif early_stopping_enabled:
+                        patience_counter += 1
+                        logger.info(
+                            f"No {selection_metric} improvement. Patience: {patience_counter}/{patience}"
+                        )
+
+                    if early_stopping_enabled and patience_counter >= patience:
                         logger.info(f'Early stopping triggered at epoch {current_epoch}.')
                         torch.save(model.state_dict(), checkpoint_dir / 'model_last.pt')
                         step = current_step
@@ -639,7 +652,7 @@ def train():
                 progress_bar.set_postfix(
                     epoch=f"{current_epoch}/{train_epochs}",
                     train_loss=f"{train_loss.item():.4f}",
-                    patience=f"{patience_counter}/{patience}",
+                    patience=f"{patience_counter}/{patience}" if early_stopping_enabled else "disabled",
                 )
     finally:
         progress_bar.close()
@@ -647,11 +660,14 @@ def train():
     # print(f"Training complete after {(time.time()-START_TIME)/60:.2f} minutes. Best val loss: {best_val_loss:.4f}")
     logger.info(
         f"Training complete after {(time.time()-START_TIME)/60:.2f} minutes. "
-        f"Best val loss: {best_val_loss:.4f} | Best val PCC: {best_val_pcc:.4f}"
+        f"Best val loss: {best_val_loss:.4f} | Best val PCC: {best_val_pcc:.4f} | "
+        f"selection_metric={selection_metric}"
     )
-    # final evaluation — test best checkpoints independently
+    # Final evaluation uses the configured paper/official-code selection metric.
+    primary_ckpt_name = "best_pcc" if selection_metric == "val_pcc" else "best_loss"
+    primary_ckpt_path = best_pcc_model_ckpt if selection_metric == "val_pcc" else best_model_ckpt
     eval_checkpoints = [
-        ('best_pcc',  best_pcc_model_ckpt),
+        (primary_ckpt_name, primary_ckpt_path),
     ]
 
     for ckpt_name, ckpt_path in eval_checkpoints:

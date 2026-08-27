@@ -637,7 +637,7 @@ training:
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 5
-  early_stopping_patience_epochs: 15
+  early_stopping_patience_epochs: 20
   early_stopping_min_delta: 1.0e-4
 ```
 

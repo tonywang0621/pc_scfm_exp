@@ -27,7 +27,16 @@ def parse_args():
     )
     parser.add_argument("--config", default="configs/ecg_baseline_wander_mecg_e.yaml")
     parser.add_argument("--input-dir", required=True, help="Directory containing source ECG files.")
-    parser.add_argument("--output-dir", default=None, help="Defaults to dataset.data_dir/processed.")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Defaults to dataset.processed_data_dir, then dataset.data_dir/processed.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Rebuild requested NPZ splits even when output files already exist.",
+    )
     parser.add_argument(
         "--dataset-name",
         default="ptbxl",
@@ -260,6 +269,8 @@ def resample_ecg(ecg, source_fs, target_fs):
 def normalize_window(window, method="z_score", eps=1e-8):
     if method == "none":
         return window.astype(np.float32)
+    if method == "endpoint_center":
+        return (window - (window[0] + window[-1]) / 2.0).astype(np.float32)
     if method == "min_max":
         lo, hi = np.min(window), np.max(window)
         return ((window - lo) / (hi - lo + eps) * 2.0 - 1.0).astype(np.float32)
@@ -273,7 +284,7 @@ def make_windows(ecg, window_size, overlap_ratio):
     return [ecg[start : start + window_size] for start in range(0, len(ecg) - window_size + 1, step)]
 
 
-def load_noise_pool(noise_dir, target_fs, window_size, seed):
+def load_noise_pool(noise_dir, target_fs, window_size, seed, shuffle=True):
     if noise_dir is None:
         return []
     rng = np.random.default_rng(seed)
@@ -290,7 +301,8 @@ def load_noise_pool(noise_dir, target_fs, window_size, seed):
                     pool.append(centered.astype(np.float32))
         except Exception:
             continue
-    rng.shuffle(pool)
+    if shuffle:
+        rng.shuffle(pool)
     return pool
 
 
@@ -312,14 +324,30 @@ def synthetic_baseline(kind, length, fs, rng, frequencies):
     return signal.sosfiltfilt(sos, white).astype(np.float32)
 
 
-def contaminate(clean, cfg, noise_pool, rng, test_kind=None):
+def _sample_alpha(alpha_values, alpha_sampling, rng):
+    if len(alpha_values) <= 1:
+        return float(alpha_values[0]) if alpha_values else 0.1
+    if alpha_sampling in {"uniform_range", "range", "continuous"}:
+        low, high = min(alpha_values), max(alpha_values)
+        return float(rng.uniform(low, high))
+    if alpha_sampling in {"integer_percent_uniform", "deepfilter", "discrete_percent"}:
+        low, high = min(alpha_values), max(alpha_values)
+        return float(rng.integers(int(round(low * 100.0)), int(round(high * 100.0))) / 100.0)
+    return float(rng.choice(alpha_values))
+
+
+def contaminate(clean, cfg, noise_pool, rng, test_kind=None, baseline_override=None):
     bw_cfg = cfg["dataset"].get("baseline_wander", {})
     alpha_values = [float(x) for x in bw_cfg.get("alpha_values", [0.1])]
     alpha_sampling = str(bw_cfg.get("alpha_sampling", "discrete")).lower()
     frequencies = [float(x) for x in bw_cfg.get("controlled_frequencies_hz", [0.1, 0.2, 0.3, 0.5])]
     kind = test_kind or bw_cfg.get("train_source", "nstdb")
 
-    if kind == "nstdb" and noise_pool:
+    if baseline_override is not None:
+        baseline = np.asarray(baseline_override, dtype=np.float32)
+        if len(baseline) != len(clean):
+            baseline = signal.resample(baseline, len(clean)).astype(np.float32)
+    elif kind == "nstdb" and noise_pool:
         baseline = noise_pool[int(rng.integers(0, len(noise_pool)))]
         if len(baseline) != len(clean):
             baseline = signal.resample(baseline, len(clean)).astype(np.float32)
@@ -333,18 +361,7 @@ def contaminate(clean, cfg, noise_pool, rng, test_kind=None):
     # scaling it to a fraction `delta` of the clean ECG's peak-to-peak range.
     baseline = baseline / (np.ptp(baseline) + 1e-8)
 
-    if len(alpha_values) <= 1:
-        # A single fixed value (e.g. one controlled robustness-sweep
-        # condition passed via --alpha-values) is applied deterministically,
-        # regardless of alpha_sampling.
-        alpha = float(alpha_values[0]) if alpha_values else 0.1
-    elif alpha_sampling in {"uniform_range", "range", "continuous"}:
-        # MECG-E/DeepFilter draw delta ~ Uniform(0.2, 2.0) continuously per
-        # sample; alpha_values = [low, high] gives the sampling bounds.
-        low, high = min(alpha_values), max(alpha_values)
-        alpha = float(rng.uniform(low, high))
-    else:
-        alpha = float(rng.choice(alpha_values))
+    alpha = _sample_alpha(alpha_values, alpha_sampling, rng)
 
     amplitude = np.ptp(clean) if bw_cfg.get("alpha_mode", "peak_to_peak_ratio") == "peak_to_peak_ratio" else 1.0
     return (clean + alpha * amplitude * baseline).astype(np.float32)
@@ -439,7 +456,11 @@ def main():
         if args.splits
         else None
     )
-    output_dir = Path(args.output_dir or (Path(dataset_cfg["data_dir"]) / "processed"))
+    output_dir = Path(
+        args.output_dir
+        or dataset_cfg.get("processed_data_dir")
+        or (Path(dataset_cfg["data_dir"]) / "processed")
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     file_map = {"train": "train.npz", "val": "val.npz", "test": "test.npz"}
     file_map.update({
@@ -452,11 +473,13 @@ def main():
     output_splits = requested_splits or (
         {"train", "val", "test"} if args.dataset_name == "ptbxl" else {args.dataset_name}
     )
-    existing_splits = {
-        split_name
-        for split_name in output_splits
-        if split_name in file_map and (output_dir / file_map[split_name]).exists()
-    }
+    existing_splits = set()
+    if not args.overwrite:
+        existing_splits = {
+            split_name
+            for split_name in output_splits
+            if split_name in file_map and (output_dir / file_map[split_name]).exists()
+        }
     for split_name in sorted(existing_splits):
         print(f"skipping existing {split_name}: {output_dir / file_map[split_name]}")
     if existing_splits == output_splits:
@@ -469,7 +492,16 @@ def main():
     window_size = int(dataset_cfg.get("window_size", 512))
     overlap_ratio = float(dataset_cfg.get("overlap_ratio", 0.5))
     split_cfg = dataset_cfg["split"]
-    noise_pool = load_noise_pool(args.noise_dir, target_fs, window_size, args.seed)
+    bw_cfg = dataset_cfg.get("baseline_wander", {})
+    noise_sampling = str(bw_cfg.get("noise_sampling", "random")).lower()
+    noise_pool = load_noise_pool(
+        args.noise_dir,
+        target_fs,
+        window_size,
+        args.seed,
+        shuffle=noise_sampling not in {"sequential", "cyclic", "deepfilter"},
+    )
+    noise_index = 0
 
     clean_by_split = {}
     noisy_by_split = {}
@@ -508,7 +540,11 @@ def main():
 
         for window in make_windows(clean, window_size, overlap_ratio):
             normalized = normalize_window(window, dataset_cfg.get("normalization", "z_score"))
-            noisy = contaminate(normalized, cfg, noise_pool, rng)
+            baseline_override = None
+            if noise_pool and noise_sampling in {"sequential", "cyclic", "deepfilter"}:
+                baseline_override = noise_pool[noise_index]
+                noise_index = (noise_index + 1) % len(noise_pool)
+            noisy = contaminate(normalized, cfg, noise_pool, rng, baseline_override=baseline_override)
             clean_by_split.setdefault(split_name, []).append(normalized)
             noisy_by_split.setdefault(split_name, []).append(noisy)
             if fold is not None:
