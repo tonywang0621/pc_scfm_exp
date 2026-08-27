@@ -181,7 +181,7 @@ Shape 建議：
 cd <PROJECT_ROOT>/src
 
 python3 preprocess_ecg.py \
-  --config configs/ecg_baseline_wander_pc_scfm.yaml \
+  --config configs/ecg_baseline_wander_preprocess_common.yaml \
   --input-dir ../data/ecg_baseline_wander/raw/PTBXL/records100 \
   --metadata-csv ../data/ecg_baseline_wander/raw/PTBXL/ptbxl_database.csv \
   --noise-dir ../data/ecg_baseline_wander/raw/NSTDB \
@@ -195,13 +195,13 @@ cd <PROJECT_ROOT>
 bash scripts/preprocess_ptbxl_records100.sh
 ```
 
-這個腳本會固定使用 `records100`、官方 `ptbxl_database.csv`、Lead II、PTB-XL folds 1-8/9/10，以及 config 內的 clean reference、window、normalization、baseline strength/frequency 設定。如果 `raw/NSTDB` 有資料，會使用 NSTDB baseline；如果還沒有 NSTDB，會先用合成 random low-frequency drift，讓 records100-only 實驗可以先跑。
+這個腳本會固定使用 `records100`、官方 `ptbxl_database.csv`、Lead II、PTB-XL folds 1-8/9/10，以及 `configs/ecg_baseline_wander_preprocess_common.yaml` 內的 clean reference、window、normalization、baseline strength/frequency 設定。前處理只應使用這個 common config；各模型自己的 YAML 只負責 paper-faithful training recipe。如果 `raw/NSTDB` 有資料，會使用 NSTDB baseline；如果還沒有 NSTDB，會先用合成 random low-frequency drift，讓 records100-only 實驗可以先跑。
 
 範例：建立外部測試 NPZ。
 
 ```bash
 python3 preprocess_ecg.py \
-  --config configs/ecg_baseline_wander_pc_scfm.yaml \
+  --config configs/ecg_baseline_wander_preprocess_common.yaml \
   --input-dir ../data/ecg_baseline_wander/raw/MITBIH \
   --noise-dir ../data/ecg_baseline_wander/raw/NSTDB \
   --dataset-name mit_bih

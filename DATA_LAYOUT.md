@@ -10,6 +10,7 @@ This project's maintained training environment is `src/`. The original PC-SCFM w
 rl_exp/
   src/
     configs/
+      ecg_baseline_wander_preprocess_common.yaml
       ecg_baseline_wander_mecg_e.yaml
       ecg_baseline_wander_mambattention.yaml
       ecg_baseline_wander_pc_scfm.yaml
@@ -144,6 +145,14 @@ test.npz: fold 10
 ```
 
 ## Config Data Path
+
+Preprocessing should use the shared config:
+
+```text
+src/configs/ecg_baseline_wander_preprocess_common.yaml
+```
+
+Model-specific configs should be used for training only, so their paper-faithful optimizer/loss/scheduler settings do not accidentally change the shared processed NPZ files.
 
 All maintained configs use this top-level setting:
 

@@ -1,0 +1,52 @@
+data_dir: "../data/ecg_baseline_wander"
+root_dir: "../runs/ecg_baseline_wander"
+
+# Common preprocessing/evaluation config.
+# Use this file only to generate shared processed NPZ files. Model-specific
+# YAML files still own each model's paper-faithful training recipe.
+
+evaluation:
+  low_frequency_high_hz: 0.5
+
+dataset:
+  name: ecg_baseline_wander
+  data_dir: "${data_dir}"
+  train_dataset: ptbxl
+  external_test_datasets:
+    - mit_bih
+    - cpsc
+    - chapman
+    - qtdb
+  lead: II
+  split:
+    strategy: ptbxl_official_folds
+    patient_wise: True
+    train_folds: [1, 2, 3, 4, 5, 6, 7, 8]
+    validation_fold: 9
+    test_fold: 10
+    ratio: [0.8, 0.1, 0.1]
+  clean_reference:
+    filter_type: butterworth
+    filter_order: 4
+    zero_phase: True
+    bandpass_hz: [0.05, 40.0]
+  resample_hz: 250
+  window_size: 512
+  overlap_ratio: 0.0
+  normalization: z_score
+  baseline_wander:
+    train_source: nstdb
+    alpha_mode: peak_to_peak_ratio
+    alpha_sampling: uniform_range
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
+    controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
+    test_types:
+      - nstdb
+      - sinusoidal
+      - multi_sine
+      - random_low_frequency_drift
+  eps: 1.0e-10
+
+model:
+  sampling_rate: 250

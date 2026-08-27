@@ -12,7 +12,11 @@ import yaml
 
 
 CONFIG_DIR = Path("src/configs")
-CONFIGS = sorted(CONFIG_DIR.glob("ecg_baseline_wander*.yaml"))
+CONFIGS = sorted(
+    path
+    for path in CONFIG_DIR.glob("ecg_baseline_wander*.yaml")
+    if path.name != "ecg_baseline_wander_preprocess_common.yaml"
+)
 
 EXPECTED = {
     ("data_dir",): "../data/ecg_baseline_wander",
