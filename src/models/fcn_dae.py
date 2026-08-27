@@ -8,6 +8,26 @@ except ImportError:
     from factory import register_model
 
 
+# Chiang et al. 2019 was implemented in Keras (see also the fperdigon/DeepFilter
+# reproduction). Keras layer defaults differ from PyTorch's, so the port pins
+# them explicitly for a faithful reproduction:
+#   - Conv1D / Conv1DTranspose kernel_initializer='glorot_uniform', bias 'zeros'
+#   - BatchNormalization momentum=0.99 (== PyTorch momentum 0.01), epsilon=1e-3
+_KERAS_BN_EPS = 1e-3
+_KERAS_BN_MOMENTUM = 0.01
+
+
+def _keras_bn(num_features):
+    return nn.BatchNorm1d(int(num_features), eps=_KERAS_BN_EPS, momentum=_KERAS_BN_MOMENTUM)
+
+
+def _keras_init(module):
+    if isinstance(module, (nn.Conv1d, nn.ConvTranspose1d)):
+        nn.init.xavier_uniform_(module.weight)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+
+
 def _match_length(x, target_length):
     current_length = x.shape[-1]
     if current_length == target_length:
@@ -30,7 +50,7 @@ class _FCNDAEConvBlock(nn.Module):
             stride=self.stride,
             padding=(self.kernel_size - self.stride) // 2,
         )
-        self.norm = nn.BatchNorm1d(int(out_channels)) if self.activate else nn.Identity()
+        self.norm = _keras_bn(out_channels) if self.activate else nn.Identity()
         self.activation = nn.ELU() if self.activate else nn.Identity()
 
     def forward(self, x):
@@ -52,7 +72,7 @@ class _FCNDAEDeconvBlock(nn.Module):
             stride=int(stride),
             padding=(int(kernel_size) - int(stride)) // 2,
         )
-        self.norm = nn.BatchNorm1d(int(out_channels)) if self.activate else nn.Identity()
+        self.norm = _keras_bn(out_channels) if self.activate else nn.Identity()
         self.activation = nn.ELU() if self.activate else nn.Identity()
 
     def forward(self, x, target_length):
@@ -63,7 +83,26 @@ class _FCNDAEDeconvBlock(nn.Module):
 
 @register_model("fcn_dae")
 class FCNDAEDenoiser(nn.Module):
-    """FCN-based denoising autoencoder from Chiang et al., IEEE Access 2019."""
+    """FCN-based denoising autoencoder from Chiang et al., IEEE Access 2019.
+
+    Implementation is paper-faithful: 6-layer strided-conv encoder + 7-layer
+    transposed-conv decoder (13 layers, kernel 16), ELU on every hidden layer,
+    no activation on the output layer, batch norm on every hidden layer only,
+    no dropout, Keras layer defaults (glorot-uniform weights, BN momentum 0.99
+    / eps 1e-3), Adam + MSE.
+
+    Task-defined / benchmark differences, shared by every baseline here so the
+    SSD/MAD/PRD/CosSim stay comparable:
+      - training/in-domain data is PTB-XL Lead II (paper: MIT-BIH), external
+        test on MIT-BIH/Chapman/CPSC/QTDB;
+      - noise is baseline wander only, from NSTDB, scaled by a peak-to-peak
+        ratio ~U(0.2, 2.0) (paper: combined BW+MA+EM at fixed input SNRs);
+      - 512-sample windows + endpoint-centering (paper: 1024 + per-window
+        min-max [0,1]). The FCN is length-agnostic and batch-norm makes it
+        input-scale-invariant, so this only changes the bottleneck to 16-dim
+        (from the paper's 32; 32x compression unchanged) -- the same setup
+        every BW-removal benchmark paper uses when it reports FCN-DAE.
+    """
 
     def __init__(
         self,
@@ -112,6 +151,8 @@ class FCNDAEDenoiser(nn.Module):
             in_channels = int(out_channels)
         self.decoder = nn.ModuleList(decoder)
 
+        self.apply(_keras_init)
+
     def forward(self, x):
         squeeze = False
         if x.ndim == 2:
@@ -121,15 +162,22 @@ class FCNDAEDenoiser(nn.Module):
             raise ValueError(f"Expected ECG shaped [B, T] or [B, 1, T], got {tuple(x.shape)}.")
 
         original_length = x.shape[-1]
-        encoder_lengths = []
         z = x
         for layer in self.encoder:
             z = layer(z)
-            encoder_lengths.append(z.shape[-1])
 
-        target_lengths = [encoder_lengths[-1]]
-        target_lengths.extend(reversed(encoder_lengths[:-1]))
-        target_lengths.append(original_length)
+        # Decoder target lengths mirror the encoder's stride schedule: every
+        # stride-2 transposed conv doubles the length, stride-1 layers keep it,
+        # and the final layer is pinned to the original input length. Deriving
+        # these from `decoder_strides` (instead of reusing `encoder` output
+        # lengths) keeps the reconstruction length-aligned for any window size
+        # (this project's benchmark uses 512; the paper uses 1024).
+        length = z.shape[-1]
+        target_lengths = []
+        for stride in self.decoder_strides:
+            length *= int(stride)
+            target_lengths.append(min(length, original_length))
+        target_lengths[-1] = original_length
 
         y = z
         for layer, target_length in zip(self.decoder, target_lengths):

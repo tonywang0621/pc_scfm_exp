@@ -149,11 +149,11 @@ noisy_ecg = clean_reference + alpha * baseline_wander
 - 使用 NSTDB Baseline Wander。
 - 從 NSTDB 隨機取樣 baseline segment。
 - 將 baseline segment 裁切或重取樣到與 ECG window 相同長度。
-- alpha 對齊 MECG-E（Hung et al. 2024）／DeepFilter（Romero et al. 2021）的雜訊縮放公式：
+- alpha 對齊 DeepFilter（Romero et al. 2021）官方 Data_Preparation 的雜訊縮放：
   noise 先以自身 peak-to-peak 範圍正規化，alpha（對應論文的 delta）從
-  Uniform(0.2, 2.0) 連續隨機抽樣，再乘上 clean ECG 的 peak-to-peak 範圍
-  （對應 `dataset.baseline_wander.alpha_sampling: uniform_range`、
-  `alpha_values: [0.2, 2.0]`）。
+  randint(20, 200) / 100（0.2–2.0 的整數百分比均勻抽樣）取樣，再乘上 clean ECG 的
+  peak-to-peak 範圍（對應 `dataset.baseline_wander.noise_sampling: deepfilter`、
+  `alpha_sampling: integer_percent_uniform`、`alpha_values: [0.2, 2.0]`）。
 
 控制變因測試：
 - Sinusoidal baseline。
@@ -377,21 +377,53 @@ Early stopping 與模型選擇原則：
 - 正式 ablation summary 預設只彙整 best validation PCC checkpoint；best validation loss checkpoint 僅在輔助分析時另行納入。
 - PTB-XL train / validation / test NPZ 必須包含 fold metadata，loader 需強制檢查 folds 1-8 / 9 / 10 是否符合設定。
 
-建議 baseline recipe 對齊方向：
-- FCN-DAE：保留原論文 encoder/decoder filter 配置、kernel size 16、ELU、MSE；optimizer、batch size、epoch 與 normalization 優先依原論文或可重現官方實作設定。
-- DRNN：不能只比較單一 LSTM stack；若主張照 Antczak DRNN，需納入論文中的 synthetic pretraining + real-data fine-tuning 或明確標示為 DRNN architecture-only baseline。
-- DeepFilter：保留 MKLANL/LANL multi-branch filter、dilated convolution、SSD+MAD objective 與官方訓練策略；若 PyTorch port 與 Keras/TensorFlow 官方 repo 有差異，需列入 implementation deviation。
-- DeScoD-ECG：使用 conditional diffusion、HNF blocks、quadratic beta schedule、50 diffusion steps、noise prediction loss 與 paper-reported self-ensemble shots；1-shot 應表示單次 reverse sampling，不做多次平均。
-- MECG-E：TF-Bi-Mamba + dense encoder/decoder 架構、STFT 設定（Hamming/實際為 Hann、n_fft=64、hop=8）、
-  time+com+con 三項 loss（含 lambda 權重）與 AdamW/lr=1e-4/ExponentialLR(gamma=0.99)/weight_decay=1e-2
-  依論文與官方 khhungg/MECG-E repo 對齊；epoch 數改用本專案統一 budget（見上）。
-- EDDM：dual-path 擴散（ECG noise + Gaussian noise 分開建模）、DAPP U-Net、RAdam/lr=1e-5/batch=64；
-  論文無公開 repo，alpha_t/beta_t 的 linear-decrease 排列為依論文限制條件重建，非驗證過的官方實作。
-- FIR/IIR：濾波器設計參數（order/cutoff/beta）依 DeepFilter 論文（Romero et al. 2021 Section 5.2）版本
-  對齊：IIR order=4、Butterworth、cutoff=0.67Hz、zero-phase，皆已生效。FIR 因論文 order=8079 與本專案
-  共用 window_size=512 不相容（filtfilt padlen 遠大於 512，會悄悄退化成非 zero-phase），改用 order=56、
-  cutoff=0.67Hz、beta=2.18 折衷（56 亦為另一篇論文 docs/fir_iir_filter.pdf 實證的最佳 FIR order）。
-- 本文模型：可採用本研究 validated recipe，但必須和 baselines 使用同一 PTB-XL validation fold 9 做 tuning 與 checkpoint selection。
+Baseline recipe 對齊現況（2026-08 已逐一對照論文 / 官方原始碼修正，細節見各 config
+註解與各 src/models/*.py docstring；驗證來源見下）：
+- 共用前處理（8 個 baseline + 所有 mambattention/pc_scfm 消融 + 提出的方法都一致，讀
+  同一份 processed/*.npz）：360 Hz resample、512 樣本不重疊切窗、endpoint-center、
+  Butterworth order-4 zero-phase 0.05-40 Hz clean reference、NSTDB baseline wander 以
+  integer-percent peak-to-peak ratio [0.2, 2.0] 縮放（DeepFilter Data_Preparation:
+  randint(20,200)/100）。由 preprocess_common.yaml 產生。
+- 訓練 recipe 每個模型 per-paper，不再有「統一 epoch budget」：DeepFilter/FCN-DAE
+  Adam 1e-3 / batch 128 / ReduceLROnPlateau + EarlyStopping / 1e5 epoch（DeepFilter
+  官方 dl_pipeline.py）；DRNN Adam / batch 64（Antczak §3.1）+ ReduceLROnPlateau（為
+  收斂加）；DeScoD Adam 1e-3 / StepLR(150,0.1) / batch 96 / 固定 400 epoch / 無 early
+  stopping（1/5/10-shot 共用，num_shots 只在 inference）；EDDM RAdam 1e-5 / batch 64 +
+  ReduceLROnPlateau；MECG-E AdamW betas[0.8,0.99] wd 1e-2 / lr 1e-4 / ExponentialLR
+  0.99 / batch 96、epoch 由論文 30 放寬到 500 + early stopping（PTB-XL 上收斂）。
+- FCN-DAE：架構/activation/BN/init/loss(MSE)/optimizer 對齊 Chiang 2019 + DeepFilter
+  復現；修了 decoder 長度重建 bug。視窗/正規化用共用 benchmark 的 512 + endpoint-center
+  （非 Chiang 原本 1024 + min-max [0,1]）—— 這正是 DeepFilter/MECG-E/DeScoD/EDDM 報
+  FCN-DAE 時用的設定。
+- DRNN：LSTM(64) + 2×Dense(64,ReLU) + Linear、MSE 對齊 Antczak「best network overall」。
+  論文的 synthetic 動力模型（McSharry ECGSYN）預訓練 + fine-tune（主貢獻）未重現 ——
+  明確標為 DRNN architecture-only baseline。
+- DeepFilter：對齊官方 fperdigon/DeepFilter deep_filter_model_I_LANL_dilated 逐行 ——
+  6 個 MKLANL 模組、dilated 模組只有 kernels 5/9/15（無 kernel-3）/ 6 branch、
+  module→Dropout(0.4)→BN、kernel-9 linear 輸出、combined_ssd_mad_loss = max(err²)·50
+  + sum(err²)。Keras 層預設（glorot init、BN momentum 0.99 / eps 1e-3）已 pin。
+- DeScoD-ECG：對齊官方 HuayuLiArizona/Score-based-ECG-Denoising + 論文 Fig 2 ——
+  HNF blocks、5 個 HNF（dilations 1/2/4/2/1）、5 個 Bridge（FiLM）、feats=64（repo
+  config 的 80 不是論文模型，論文 Table VII 參數量 1.22M 對應 64）、Kaiming init、
+  quad beta schedule T=50、L1-sum loss（官方碼，非論文 Eq.12 的 L2）。1-shot = 單次
+  reverse、不平均。（官方碼 zip 把最後一個 HNF 截掉，我們照 Fig 2 保留全部 5 個。）
+- EDDM：對齊論文方程式 —— dual-path 擴散 Eq.5、reverse Eq.7、posterior Eq.6、L2 雙路
+  loss Eq.8、T=50、雙 U-Net + self-attention + 第一個 skip 上的 DAPP。修了 beta_bar_T
+  （原本 ≈0.03 → 1，論文 §III-B「x_T = x_tilde + eps」）。論文無公開 repo，alpha_t/
+  beta_t 的線性下降閉式、DAPP pool scales、U-Net 通道寬度是依限制條件 best-effort 重建。
+- MECG-E：config 每個值 = 官方 config/MECGE_phase.yaml；架構/loss(time+com+con, 0.5
+  權重)/Hann STFT/AdamW recipe 對齊 khhungg/MECG-E pipeline.py。官方 grad clipping 是
+  註解掉的 → grad_clip_norm: null。
+- FIR/IIR：對齊 DeepFilter §5.2 / 官方 digitalFilters/dfilters.py ——
+  IIR order=4、Butterworth、cutoff=0.67Hz、zero-phase filtfilt；
+  FIR kaiserord ripple_db = 61/2 = 30.5 dB → beta 2.187、numtaps 8079（論文「order of
+  8079 and a beta of 2.18」）—— 用 fixed_order 直接 pin（scipy 現在的 kaiserord 會把
+  transition width 內部再除以 2，回 ~16150 taps）。套在 512 視窗上用 DeepFilter 的鏡像
+  padding + filtfilt + 取中段。之前「改用 order=56」的折衷（另一篇 docs/fir_iir_filter.pdf
+  的最佳值）已放棄，改回 DeepFilter 8079。
+- 本文模型：可採用本研究 validated recipe（proposed 的 cfm_unet_bd 用 ReduceLROnPlateau
+  + 非常有耐心的 early stopping 確保收斂），但必須和 baselines 使用同一 PTB-XL validation
+  fold 9 做 tuning 與 checkpoint selection。
 
 統計分析建議：
 - 對每個 ECG window 計算指標。
@@ -525,9 +557,9 @@ Early stopping 與模型選擇原則：
 3. Baseline Wander 合成
 - 程式：code/preprocess_ecg.py。
 - 支援 NSTDB、sinusoidal、multi_sine、random low-frequency drift。
-- 主訓練/評估用 alpha_sampling: uniform_range，alpha_values: [0.2, 2.0]（連續均勻抽樣，對齊
-  MECG-E／DeepFilter 的 delta ~ Uniform(0.2, 2.0) 雜訊縮放公式）；alpha_values 只給單一值時
-  視為固定強度（供 Experiment 2 sweep 用）。
+- 主訓練/評估用 noise_sampling: deepfilter + alpha_sampling: integer_percent_uniform，
+  alpha_values: [0.2, 2.0]（對齊 DeepFilter 官方 Data_Preparation 的 randint(20,200)/100
+  整數百分比抽樣）；alpha_values 只給單一值時視為固定強度（供 Experiment 2 sweep 用）。
 - Experiment 2 robustness sweep 另外用 robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
   （對齊 DeepFilter／MECG-E 論文回報的 noise-amplitude 分段）。
 - 支援 controlled_frequencies_hz，例如 0.05、0.1、0.2、0.3、0.5、0.8、1.0 Hz。
@@ -538,13 +570,16 @@ Early stopping 與模型選擇原則：
 - mambattention_stfrft_ecg 使用與 mambattention_ecg 相同的資料與主要 backbone 參數；核心差異是將 STFT 前處理替換為 learnable STFrFT。
 - 支援 checkpoint、resume、early stopping、loss curves。
 - 訓練結束會評估 PTB-XL fold 10，若 external NPZ 存在也會評估 MIT-BIH、Chapman、CPSC。
-- 目前狀態：fcn_dae、drnn、deepfilter、descod_ecg_1shot/5shot/10shot、mecg_e、eddm 的
-  optimizer/lr/betas/weight_decay/scheduler 已個別對齊各自論文（細節見
-  scripts/check_experiment_config.sh 的 EXPECTED_TRAINING_BY_MODEL），train_supervised.py
-  已支援 Adam/AdamW/RAdam 與 none/StepLR/ExponentialLR/ReduceLROnPlateau。
-  train_epochs = 50000、early_stopping_patience_epochs = 20 則是專案刻意統一的跨 baseline
-  訓練 budget（而非未客製化的 fallback），目的是讓所有模型享有相同訓練預算以維持比較公平性；
-  各自論文若有不同的固定 epoch 數，僅供對照，不再套用於實際訓練設定。
+- 目前狀態（2026-08）：fcn_dae、drnn、deepfilter、descod_ecg_1shot/5shot/10shot、mecg_e、
+  eddm、fir、iir 的架構/loss/optimizer/lr/betas/weight_decay/scheduler 已逐一對照各自論文
+  或官方原始碼修正（見上「Baseline recipe 對齊現況」與 EXPECTED_TRAINING_BY_MODEL）。
+  train_supervised.py 支援 Adam/AdamW/RAdam、none/StepLR/ExponentialLR/ReduceLROnPlateau、
+  per-config grad_clip_norm、val_pcc / val_loss 兩種選模，且不論選哪個都同時存
+  best_pcc_model.pt 與 best_model.pt。
+  **不再有統一 epoch budget**：每個模型的 train_epochs / scheduler / early stopping 依其
+  論文或官方碼，缺項才用專案 default。凡是有 early stopping 的都用很小的 min_delta（1e-5）
+  以免在收斂前停；DeScoD 照論文固定 400 epoch、無 early stopping；MECG-E 由論文 30 放寬到
+  500 + early stopping 讓它在較大的 PTB-XL 上收斂。
 
 5. Inference
 - 程式：code/inference.py。

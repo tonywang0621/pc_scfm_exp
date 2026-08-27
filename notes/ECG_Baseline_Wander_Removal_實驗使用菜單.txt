@@ -117,7 +117,8 @@ shape：
 目前 YAML 預設：
 
   window_size: 512
-  resample_hz: 250
+  resample_hz: 360
+  normalization: endpoint_center
 
 建議 shape：
 

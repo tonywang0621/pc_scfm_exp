@@ -188,7 +188,7 @@ target
 
 ```text
 T = 512
-sampling rate = 250 Hz
+sampling rate = 360 Hz
 dtype = float32
 ```
 
@@ -657,12 +657,16 @@ python train_supervised.py \
 
 ```yaml
 dataset:
-  resample_hz: 250
+  resample_hz: 360
   window_size: 512
   overlap_ratio: 0.0
-  normalization: z_score
+  normalization: endpoint_center
   clean_reference:
     bandpass_hz: [0.05, 40.0]
+  baseline_wander:
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
+    alpha_values: [0.2, 2.0]
 ```
 
 常用模型參數：

@@ -274,6 +274,13 @@ def normalize_window(window, method="z_score", eps=1e-8):
     if method == "min_max":
         lo, hi = np.min(window), np.max(window)
         return ((window - lo) / (hi - lo + eps) * 2.0 - 1.0).astype(np.float32)
+    if method == "min_max_01":
+        # Per-window min-max to [0, 1]. Chiang et al. 2019 (FCN-DAE) normalise
+        # every clean signal to [0, 1] before adding noise ("so that the
+        # amplitudes of the sampling points laid between 0 and 1"); baseline
+        # wander is then added on top, so the model input can leave [0, 1].
+        lo, hi = np.min(window), np.max(window)
+        return ((window - lo) / (hi - lo + eps)).astype(np.float32)
     return ((window - np.mean(window)) / (np.std(window) + eps)).astype(np.float32)
 
 

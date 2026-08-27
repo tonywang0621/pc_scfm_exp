@@ -13,16 +13,23 @@ log_config: False
 log_model_architecture: False
 
 training:
-  # MECG-E paper-faithful recipe (Hung et al. 2024, Section IV-B / official
-  # khhungg/MECG-E pipeline.py + config/MECGE_phase.yaml): AdamW(betas=[0.8,
-  # 0.99]), lr=1e-4, ExponentialLR(gamma=0.99), batch_size=96. weight_decay
-  # is not passed explicitly in the official optimizer call, which means it
-  # falls back to AdamW's own default of 1e-2 -- matching the paper's stated
-  # "weight decay was set to 1e-2", so we set it explicitly here (this
-  # project's AdamW builder otherwise defaults to 0.0, unlike bare PyTorch).
-  # train_epochs: the paper text says 40 epochs, and the official released
-  # config/MECGE_phase.yaml trains for 30. We follow the official config.
-  train_epochs: 30
+  # MECG-E paper-faithful recipe (Hung et al. 2024 / official khhungg/MECG-E
+  # pipeline.py + config/MECGE_phase.yaml): AdamW(betas=[0.8, 0.99]), lr=1e-4,
+  # ExponentialLR(gamma=0.99), batch_size=96. The official optimizer call
+  # passes no weight_decay, so it falls back to AdamW's default 1e-2 (also
+  # the paper's stated value); this project's AdamW builder defaults to 0.0,
+  # so it is set explicitly here. The official code has gradient clipping
+  # commented out -> grad_clip_norm: null (the shared training loop otherwise
+  # clips at 1.0).
+  # train_epochs: the paper text says 40, the released config 30 -- both
+  # tuned for the QT Database. On this project's larger PTB-XL training set
+  # (and harder BW-only task) that undertrains, so the budget is raised to
+  # 500 with EarlyStopping(patience 20, min_delta 1e-5 -- deliberately
+  # patient so it never stops short of convergence). ExponentialLR(0.99)
+  # still anneals the LR from the paper's value and the best-val checkpoint
+  # is saved throughout, so the run captures MECG-E's true optimum whether
+  # that lands at epoch 30 or 300.
+  train_epochs: 500
   batch_size: 96
   lr: 1.0e-4
   optimizer: AdamW
@@ -30,11 +37,12 @@ training:
   weight_decay: 1.0e-2
   scheduler: ExponentialLR
   gamma: 0.99
+  grad_clip_norm: null
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 5
-  early_stopping_patience_epochs: null
-  early_stopping_min_delta: 1.0e-4
+  early_stopping_patience_epochs: 20
+  early_stopping_min_delta: 1.0e-5
   selection_metric: val_loss
   progress_bar: True
   resume: False
@@ -46,7 +54,6 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
-  processed_data_dir: "${data_dir}/processed/mecg_e"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -72,13 +79,13 @@ dataset:
   normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
-    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
-    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
-    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
-    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
-    # range. robustness_alpha_values is a separate, discrete grid used only
-    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
-    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
+    # DeepFilter (Romero et al. 2021) Data_Preparation noise scaling: the
+    # NSTDB baseline segment is normalised by its own peak-to-peak range,
+    # then scaled to delta * ptp(clean ECG) where delta = randint(20, 200) /
+    # 100 per window (noise_sampling: deepfilter + integer_percent_uniform).
+    # robustness_alpha_values is a separate discrete grid used only by
+    # Experiment 2 (exp2-strength sweep), matching DeepFilter / MECG-E's
+    # reported noise-amplitude bins.
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform

@@ -152,7 +152,7 @@ Preprocessing should use the shared config:
 src/configs/ecg_baseline_wander_preprocess_common.yaml
 ```
 
-Model-specific configs should be used for training only, so their paper-faithful optimizer/loss/scheduler settings do not accidentally change the shared processed NPZ files.
+Model-specific configs should be used for training only. Every model config (baselines, ablations, and the proposed model) now carries an **identical** `dataset:` block that mirrors `preprocess_common.yaml` (360 Hz resample, 512-sample windows, endpoint-centering, Butterworth-4 zero-phase 0.05-40 Hz clean reference, NSTDB baseline wander at an integer-percent peak-to-peak ratio in [0.2, 2.0]), and none set `processed_data_dir` -- so a single preprocessing run writes `processed/*.npz` that every model reads. The model YAML's real job is the per-paper optimizer / loss / scheduler recipe.
 
 All maintained configs use this top-level setting:
 

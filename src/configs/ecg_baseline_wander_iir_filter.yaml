@@ -35,7 +35,6 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
-  processed_data_dir: "${data_dir}/processed/iir_filter"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -61,13 +60,13 @@ dataset:
   normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
-    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
-    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
-    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
-    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
-    # range. robustness_alpha_values is a separate, discrete grid used only
-    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
-    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
+    # DeepFilter (Romero et al. 2021) Data_Preparation noise scaling: the
+    # NSTDB baseline segment is normalised by its own peak-to-peak range,
+    # then scaled to delta * ptp(clean ECG) where delta = randint(20, 200) /
+    # 100 per window (noise_sampling: deepfilter + integer_percent_uniform).
+    # robustness_alpha_values is a separate discrete grid used only by
+    # Experiment 2 (exp2-strength sweep), matching DeepFilter / MECG-E's
+    # reported noise-amplitude bins.
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform
@@ -83,16 +82,16 @@ dataset:
 
 model:
   sampling_rate: 360
-  # IIR paper-faithful design: aligned to the DeepFilter paper's (Romero
-  # et al. 2021, Section 5.2) IIR baseline -- order=4, Butterworth,
-  # bi-directional (zero-phase), cutoff 0.67 Hz (same AHA-recommended
-  # high-pass cutoff used for its FIR baseline; the paper does not
-  # re-state the cutoff in the IIR paragraph, this is inferred from "both
-  # filters" sharing the design). This order is small enough that
-  # filtfilt's padlen (~12 samples) fits comfortably within this
-  # project's dataset.window_size=512, so zero_phase=True actually takes
-  # effect here (unlike the FIR baseline's order=8079 -- see
-  # ecg_baseline_wander_fir_filter.yaml for that unresolved caveat).
+  # IIR baseline = the official DeepFilter IIR (Romero et al. 2021 Sec. 5.2 /
+  # fperdigon/DeepFilter digitalFilters/dfilters.py IIRRemoveBL): order-4
+  # Butterworth high-pass, bi-directional / zero-phase, cutoff 0.67 Hz (AHA;
+  # "both filters" share the FIR baseline's cutoff), then an IIRRemoveHF
+  # 150 Hz low-pass stage. filtfilt's padlen (~12) fits well within the 512
+  # window, so no short-signal padding is triggered here.
+  # Implementation nuance vs DeepFilter: DeepFilter runs filtfilt(b, a) on
+  # transfer-function coefficients; this port designs the same order-4
+  # Butterworth as SOS and runs sosfiltfilt -- numerically identical to ~1e-7
+  # at this order, and more stable.
   filter_kind: iir
   cutoff_hz: 0.67
   iir_order: 4

@@ -43,7 +43,6 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
-  processed_data_dir: "${data_dir}/processed/descod_ecg_1shot"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -69,13 +68,13 @@ dataset:
   normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
-    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
-    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
-    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
-    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
-    # range. robustness_alpha_values is a separate, discrete grid used only
-    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
-    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
+    # DeepFilter (Romero et al. 2021) Data_Preparation noise scaling: the
+    # NSTDB baseline segment is normalised by its own peak-to-peak range,
+    # then scaled to delta * ptp(clean ECG) where delta = randint(20, 200) /
+    # 100 per window (noise_sampling: deepfilter + integer_percent_uniform).
+    # robustness_alpha_values is a separate discrete grid used only by
+    # Experiment 2 (exp2-strength sweep), matching DeepFilter / MECG-E's
+    # reported noise-amplitude bins.
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform
@@ -90,7 +89,7 @@ dataset:
   eps: 1.0e-10
 
 model:
-  feats: 64  # matches official ConditionalModel default (Score-based-ECG-Denoising repo)
+  feats: 64  # reproduces the paper's ~1.22M params (Table VII); repo config/base.yaml's feats=80 is not the paper model
   num_steps: 50
   beta_start: 1.0e-4
   beta_end: 0.5

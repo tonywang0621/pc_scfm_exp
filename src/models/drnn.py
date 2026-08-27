@@ -12,15 +12,27 @@ except ImportError:
 class DRNNDenoiser(nn.Module):
     """Deep recurrent denoising network following Antczak's DRNN layout.
 
-    Architecture-only baseline: Antczak (2018) reports the best-performing
-    network as a single 64-unit LSTM layer, followed by two 64-unit ReLU
-    dense layers, followed by one linear output layer (Fig. 5 / Section
-    3.1). That is the default configuration below. The paper's synthetic
-    (dynamical-model) pretraining + real-data fine-tuning protocol is not
-    reproduced here -- this baseline is trained end-to-end on the project's
-    unified PTB-XL train / multi-dataset test split and preprocessing, per
-    the "DRNN architecture-only baseline" option in
-    notes/experiment_實驗設計.txt.
+    Verified against Antczak (2018), "Deep Recurrent Neural Networks for ECG
+    Signal Denoising":
+      - architecture (Fig. 2 / Section 3.1 "best network overall"): one
+        unidirectional 64-unit LSTM layer, then two ReLU dense layers of 64
+        units each, then one linear output layer; input and output width 1.
+        No dropout / no L2 (Section 4 lists these only as future work), no
+        residual connection, no bidirectionality (Section 2.1: "input signal
+        to LSTM ... applied one sample at a time").
+      - loss: MSE (Section 3.1). Optimiser: Adam, batch 64 (Section 3.1).
+
+    NOT reproduced -- this is a DRNN *architecture-only* baseline, the option
+    explicitly allowed in notes/experiment_實驗設計.txt:
+      - the paper's synthetic dynamical-model (McSharry ECGSYN) pretraining
+        followed by real-data fine-tuning (Sections 2.2 / 3.2), which is the
+        paper's main contribution.
+
+    Task-defined differences, shared by every baseline here: training data is
+    PTB-XL Lead II (paper: PTB aVL lead + synthetic), the noise is baseline
+    wander (paper: additive white noise, SNR-based), windows are 512 samples
+    (paper: 600), normalisation is endpoint-centering (paper: zero-mean), at
+    360 Hz (paper: 512 Hz synthetic / native PTB).
     """
 
     def __init__(

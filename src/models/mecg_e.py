@@ -1166,4 +1166,35 @@ class ECGDenoisingModel(nn.Module):
 
 @register_model("mecg_e")
 class MECGEDenoiser(ECGDenoisingModel):
+    """MECG-E: Mamba-based ECG Enhancer for baseline wander removal
+    (Hung et al. 2024).
+
+    Verified against the paper and the official repo (khhungg/MECG-E,
+    models/MECGE.py + config/MECGE_phase.yaml + pipeline.py):
+      - DenseEncoder (Conv2d 1x1 -> InstanceNorm -> PReLU, DenseBlock depth 4
+        with dilations 1/2/4/8, Conv2d 1x3 stride (1,2)) -> 4 TF-Bi-Mamba
+        blocks (bidirectional time + frequency Mamba, d_state 16 / d_conv 4 /
+        expand 4, RMSNorm eps 1e-5) -> Mask decoder (LearnableSigmoid, beta 2)
+        + Phase decoder; fea="pha", dense_channel 32.
+      - STFT: Hann window, n_fft 64, hop 8, win 64, compress_factor 0.3,
+        center + reflect pad; no input normalisation (norm=False).
+      - loss "time+com+con" = 0.5*L1(x, x_hat)/nf + 0.5*2*MSE(Yc, Xc_hat)/nf
+        + 0.5*2*MSE(Xc_hat, STFT(x_hat))/nf  (Xc_hat is the network's directly
+        predicted complex spectrum), matching MECGE.py exactly.
+      - training: AdamW(betas=[0.8, 0.99], weight_decay=1e-2 default),
+        lr 1e-4, ExponentialLR(gamma=0.99), batch 96, 30 epochs, lowest-val-
+        loss checkpoint, NO gradient clipping (commented out upstream ->
+        config sets grad_clip_norm: null).
+
+    Task-defined differences, shared by every baseline here: training data is
+    PTB-XL Lead II (paper: QT Database beats), windows are fixed 512-sample
+    slices (paper: heartbeats zero-padded to 512), and the clean reference is
+    0.05-40 Hz Butterworth filtered (paper: raw QT ECG). 360 Hz, the STFT
+    config, endpoint-centering and peak-to-peak noise all match, so this
+    model stays in the main comparison table.
+
+    (The PC-SCFM RL/flow scaffolding in MECGECore is inert here: the config
+    does not set pcscfm_enabled, so restore() runs the plain one-shot path.)
+    """
+
     block_cls = TSMambaBlock

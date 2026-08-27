@@ -54,21 +54,22 @@ dataset:
     filter_order: 4
     zero_phase: True
     bandpass_hz: [0.05, 40.0]
-  resample_hz: 250
+  resample_hz: 360
   window_size: 512
   overlap_ratio: 0.0
-  normalization: z_score
+  normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
-    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
-    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
-    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
-    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
-    # range. robustness_alpha_values is a separate, discrete grid used only
-    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
-    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
+    # DeepFilter (Romero et al. 2021) Data_Preparation noise scaling: the
+    # NSTDB baseline segment is normalised by its own peak-to-peak range,
+    # then scaled to delta * ptp(clean ECG) where delta = randint(20, 200) /
+    # 100 per window (noise_sampling: deepfilter + integer_percent_uniform).
+    # robustness_alpha_values is a separate discrete grid used only by
+    # Experiment 2 (exp2-strength sweep), matching DeepFilter / MECG-E's
+    # reported noise-amplitude bins.
     alpha_mode: peak_to_peak_ratio
-    alpha_sampling: uniform_range
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
     alpha_values: [0.2, 2.0]
     robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
     controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
@@ -105,7 +106,7 @@ model:
   dual_noise_head_hidden: 64
   residual_refine_scale: 0.5
   baseline_kernel_size: 129
-  sampling_rate: 250
+  sampling_rate: 360
   n_fft: 64
   hop_size: 8
   win_size: 64

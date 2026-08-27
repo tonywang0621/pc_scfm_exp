@@ -35,7 +35,6 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
-  processed_data_dir: "${data_dir}/processed/fir_filter"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -61,13 +60,13 @@ dataset:
   normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
-    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
-    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
-    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
-    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
-    # range. robustness_alpha_values is a separate, discrete grid used only
-    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
-    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
+    # DeepFilter (Romero et al. 2021) Data_Preparation noise scaling: the
+    # NSTDB baseline segment is normalised by its own peak-to-peak range,
+    # then scaled to delta * ptp(clean ECG) where delta = randint(20, 200) /
+    # 100 per window (noise_sampling: deepfilter + integer_percent_uniform).
+    # robustness_alpha_values is a separate discrete grid used only by
+    # Experiment 2 (exp2-strength sweep), matching DeepFilter / MECG-E's
+    # reported noise-amplitude bins.
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform
@@ -83,21 +82,26 @@ dataset:
 
 model:
   sampling_rate: 360
-  # FIR design: Kaiser window, cutoff 0.67 Hz (AHA-recommended high-pass,
-  # matching the DeepFilter paper's, Romero et al. 2021 Section 5.2, chosen
-  # cutoff) and beta=2.18 (DeepFilter's Kaiser beta, which only depends on
-  # the target stopband attenuation of 30.5 dB and is independent of order).
-  # Strict DeepFilter official-code FIR setting: kaiserord design with
-  # factor=4.5, transition width=0.07 Hz, filtfilt mirror/constant padding for
-  # short 512-sample beats, followed by the optional 150 Hz low-pass stage.
+  # FIR baseline = the official DeepFilter FIR (Romero et al. 2021 Sec. 5.2 /
+  # fperdigon/DeepFilter digitalFilters/dfilters.py FIRRemoveBL). DeepFilter
+  # runs kaiserord(ripple_db = (round(-20*log10(0.001)) + 1) / 2 = 30.5 dB,
+  # width = 0.07 Hz / nyquist) and reports the resulting design as "order of
+  # 8079 and a beta of 2.18". We pin those directly (fixed_order) so the tap
+  # count matches the paper exactly -- scipy's current kaiserord halves the
+  # transition width internally and would return ~16150 taps instead.
+  # kaiser_beta = kaiser_beta(30.5 dB) = 2.187. Cutoff 0.67 Hz (AHA
+  # high-pass). Applied to each 512-sample window with DeepFilter's
+  # short-signal trick (mirror the window, tail-pad with the last sample,
+  # filtfilt, take the central segment), then the FIRRemoveHF 150 Hz
+  # low-pass stage.
   filter_kind: fir
   cutoff_hz: 0.67
-  fir_design: kaiserord
-  fir_order: 8079
+  fir_design: fixed_order
+  fir_order: 8078            # numtaps = fir_order + 1 = 8079 (paper's order)
   fir_window: kaiser
-  kaiser_beta: 2.18
-  kaiser_factor: 4.5
-  transition_width_hz: 0.07
+  kaiser_beta: 2.187         # kaiser_beta(30.5 dB); paper rounds to 2.18
+  kaiser_factor: 2.0         # documents the ripple_db divisor (unused in fixed_order)
+  transition_width_hz: 0.07  # documents the kaiserord width (unused in fixed_order)
   zero_phase: True
   allow_causal_fallback: False
   short_signal_mode: deepfilter_pad

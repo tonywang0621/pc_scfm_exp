@@ -374,6 +374,17 @@ def train():
     patience_counter = 0
     stop_training = False
 
+    # Per-model gradient-norm clipping. Diffusion baselines (DeScoD-ECG) clip
+    # at 1.0 in their released code; the DeepFilter-family Keras models and
+    # MECG-E do not clip at all. Default 1.0; set training.grad_clip_norm to
+    # null / 0 to disable.
+    grad_clip_norm = args.training.get('grad_clip_norm', 1.0)
+    grad_clip_norm = (
+        float(grad_clip_norm)
+        if grad_clip_norm not in {None, False, "none", "None", "null", "Null", 0, 0.0}
+        else None
+    )
+
     step = 0
     running_train_loss = 0
     running_train_steps = 0
@@ -440,7 +451,8 @@ def train():
                 optimizer.zero_grad()
                 train_loss = model.compute_loss(train_batch, device)
                 train_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                if grad_clip_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_norm)
                 optimizer.step()
 
                 running_train_loss += train_loss.item()

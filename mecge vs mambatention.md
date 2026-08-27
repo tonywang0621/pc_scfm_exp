@@ -21,8 +21,9 @@ External test: MIT-BIH, Chapman, CPSC
 Clean reference: 經一致前處理後、尚未加入 Baseline Wander 的 ECG
 Baseline Wander train source: NSTDB
 Window size: 512
-Sampling rate: 250 Hz
-Normalization: z-score
+Sampling rate: 360 Hz
+Normalization: endpoint-center
+Baseline wander scaling: integer-percent peak-to-peak ratio in [0.2, 2.0] (DeepFilter Data_Preparation)
 ```
 
 比較模型：

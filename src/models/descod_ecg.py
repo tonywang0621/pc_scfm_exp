@@ -115,16 +115,25 @@ class ConditionalScoreModel(nn.Module):
             ]
         )
         self.embed = NoiseLevelEmbedding(feats)
-        self.bridge = nn.ModuleList([Bridge(feats, feats) for _ in range(len(self.stream_x))])
+        # Paper Fig. 2: one Bridge per HNF block (not per stream layer), so
+        # len(dilations) bridges -- the leading input conv is NOT bridged.
+        # This also restores the paper's reported ~1.22M parameter count
+        # (Table VII); bridging the input conv too would add one extra Bridge.
+        # (The released code pairs 5 bridges against a 6-entry stream via
+        #  zip(), which instead drops the last HNF block; we follow the
+        #  figure, keeping all 5 HNF blocks with dilations 1,2,4,2,1.)
+        self.bridge = nn.ModuleList([Bridge(feats, feats) for _ in dilations])
         self.conv_out = _KaimingConv1d(feats, 1, 9, padding=4, padding_mode="reflect")
 
     def forward(self, x, condition, noise_scale):
         noise_embed = self.embed(noise_scale)
+        x = self.stream_x[0](x)
+        condition = self.stream_cond[0](condition)
         bridge_features = []
-        for layer, bridge in zip(self.stream_x, self.bridge):
+        for layer, bridge in zip(self.stream_x[1:], self.bridge):
             x = layer(x)
             bridge_features.append(bridge(x, noise_embed))
-        for bridge_feature, layer in zip(bridge_features, self.stream_cond):
+        for layer, bridge_feature in zip(self.stream_cond[1:], bridge_features):
             condition = layer(condition) + bridge_feature
         return self.conv_out(condition)
 
@@ -253,15 +262,37 @@ class DeScoDDDPM(nn.Module):
 class DeScoDECGDenoiser(nn.Module):
     """DeScoD-ECG conditional score-based diffusion denoiser (Li et al. 2023).
 
-    Defaults follow the official implementation (HuayuLiArizona/Score-based-ECG-
-    Denoising): feats=64, dilations=(1,2,4,2,1), T=50 diffusion steps, quad beta
-    schedule (beta_start=1e-4, beta_end=0.5, matching paper Eq. 10-11), and an
-    L1 noise-prediction loss with sum reduction. Note the paper's Eq. (12) states
-    the loss as squared L2, but the official released code trains with
-    nn.L1Loss(reduction='sum') -- this implementation follows the code.
-    num_shots controls the self-ensemble average size (Eq. 13); num_shots=1 is a
-    single reverse-diffusion sample with no averaging, per
-    notes/experiment_實驗設計.txt.
+    Verified against the paper and the official repo (HuayuLiArizona/
+    Score-based-ECG-Denoising):
+      - two-stream HNF network (Fig. 2): input conv(1->feats, k9)+LeakyReLU,
+        then 5 HNF blocks with dilations (1,2,4,2,1) per stream, 5 Bridge
+        (FiLM) blocks -- one per HNF block -- carrying sqrt(alpha_bar)-
+        conditioned features from the x_t stream into the noisy-obs stream,
+        then a k9 conv to 1 channel. feats=64 reproduces the paper's ~1.22M
+        parameter count (Table VII); the repo's config/base.yaml feats=80 is
+        NOT the paper's model.
+      - HNF block: 4 dilated convs (k 3/5/9/15) -> concat -> k9 conv ->
+        half-instance-norm -> LeakyReLU(0.2) -> k9 conv -> LeakyReLU(0.2) ->
+        residual. Kaiming-normal conv init, reflect padding.
+      - diffusion: T=50, quad beta schedule (1e-4 -> 0.5, Eq. 10-11),
+        continuous noise-level sampling ~U(sqrt(a_bar_{t-1}), sqrt(a_bar_t))
+        (Alg. 1), noise-prediction target, DDPM ancestral reverse over all T
+        steps (Alg. 2). Loss: nn.L1Loss(reduction='sum') -- the paper's
+        Eq. (12) writes L2, but the released code trains with L1-sum.
+      - num_shots = paper's M-shots self-ensemble (Alg. 2 / Eq. 13, official
+        evaluate(shots=)); num_shots=1 is a single reverse pass, no averaging.
+
+    Training recipe (paper Sec. IV-C): Adam lr 1e-3, StepLR(step 150,
+    gamma 0.1), batch 96, 400 epochs, grad-norm clip 1.0, lowest-val-loss
+    checkpoint -- all set in the config / shared training loop.
+
+    Task-defined differences, shared by every baseline here: training data is
+    PTB-XL Lead II (paper: QT Database beats), windows are fixed 512-sample
+    slices (paper: annotated heartbeats zero-padded to 512, offset 16), and
+    the clean reference is 0.05-40 Hz Butterworth filtered (paper: raw QT
+    ECG, endpoint-centered only). 360 Hz, endpoint-centering, 512 length and
+    peak-to-peak noise scaling ~U(0.2, 2.0) match, so this model stays in the
+    main comparison table.
     """
 
     def __init__(

@@ -13,26 +13,39 @@ log_config: False
 log_model_architecture: False
 
 training:
-  # DeepFilter official comparison recipe for DRNN: Adam(lr=1e-3), MSE loss,
-  # batch_size=128, ReduceLROnPlateau + EarlyStopping on val_loss.
-  # Antczak's separate synthetic-pretraining protocol is not available in the
-  # DeepFilter comparison code path used for this BLW benchmark.
-  train_epochs: 100000
-  batch_size: 128
+  # DRNN paper-faithful recipe (Antczak 2018, Section 3.1): "stochastic
+  # gradient descent with adaptive momentum (Adam)", "64 samples per-batch",
+  # "loss metric was mean squared error", no LR schedule and no L2 / dropout
+  # (Section 4 lists regularisation only as future work). Antczak gives no
+  # learning rate (kept at 1e-3, the Keras Adam default) and his epoch counts
+  # (20-50) were tied to a 2000-5000-sample dataset, so train_epochs /
+  # early_stopping_patience use this project's unified cross-baseline budget.
+  # Antczak's synthetic dynamical-model pretraining + real-data fine-tuning
+  # (Sections 2.2 / 3.2) is NOT reproduced -- this is a DRNN architecture-only
+  # baseline, per notes/experiment_實驗設計.txt.
+  # Antczak specifies no LR schedule, but a fixed LR leaves an LSTM denoiser
+  # oscillating around the optimum; ReduceLROnPlateau (the schedule the
+  # DeepFilter DRNN reproduction also uses) is added so it anneals to a tight
+  # minimum. EarlyStopping is deliberately patient (min_delta 1e-5) so it
+  # never stops before convergence; the best-val checkpoint is saved
+  # throughout.
+  train_epochs: 50000
+  batch_size: 64
   lr: 1.0e-3
   optimizer: Adam
   betas: [0.9, 0.999]
   weight_decay: 0.0
   scheduler: ReduceLROnPlateau
   factor: 0.5
-  lr_scheduler_patience_epochs: 2
-  lr_scheduler_min_delta: 0.05
-  min_lr: 1.0e-10
+  lr_scheduler_patience_epochs: 3
+  lr_scheduler_min_delta: 1.0e-4
+  min_lr: 1.0e-8
+  grad_clip_norm: null  # Antczak / DeepFilter (Keras) DRNN does not clip gradients
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 50
-  early_stopping_patience_epochs: 10
-  early_stopping_min_delta: 0.05
+  early_stopping_patience_epochs: 20
+  early_stopping_min_delta: 1.0e-5
   selection_metric: val_loss
   progress_bar: True
   resume: False
@@ -44,7 +57,6 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
-  processed_data_dir: "${data_dir}/processed/drnn"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -70,13 +82,13 @@ dataset:
   normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
-    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
-    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
-    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
-    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
-    # range. robustness_alpha_values is a separate, discrete grid used only
-    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
-    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
+    # DeepFilter (Romero et al. 2021) Data_Preparation noise scaling: the
+    # NSTDB baseline segment is normalised by its own peak-to-peak range,
+    # then scaled to delta * ptp(clean ECG) where delta = randint(20, 200) /
+    # 100 per window (noise_sampling: deepfilter + integer_percent_uniform).
+    # robustness_alpha_values is a separate discrete grid used only by
+    # Experiment 2 (exp2-strength sweep), matching DeepFilter / MECG-E's
+    # reported noise-amplitude bins.
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform

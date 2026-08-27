@@ -34,6 +34,7 @@ training:
   lr_scheduler_patience_epochs: 2
   lr_scheduler_min_delta: 0.05
   min_lr: 1.0e-10
+  grad_clip_norm: null  # official DeepFilter (Keras) does not clip gradients
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 50
@@ -50,7 +51,6 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
-  processed_data_dir: "${data_dir}/processed/deepfilter"
   train_dataset: ptbxl
   external_test_datasets:
     - mit_bih
@@ -76,13 +76,13 @@ dataset:
   normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
-    # MECG-E (Hung et al. 2024) / DeepFilter (Romero et al. 2021) noise
-    # scaling: delta ~ Uniform(0.2, 2.0) drawn continuously per sample (see
-    # preprocess_ecg.py contaminate()), scaling the noise (normalized by its
-    # own peak-to-peak range) to `delta` times the clean ECG's peak-to-peak
-    # range. robustness_alpha_values is a separate, discrete grid used only
-    # by Experiment 2 (exp2-strength sweep controlled conditions), matching
-    # DeepFilter/MECG-E's reported noise-amplitude bins (Table III-VI).
+    # DeepFilter (Romero et al. 2021) Data_Preparation noise scaling: the
+    # NSTDB baseline segment is normalised by its own peak-to-peak range,
+    # then scaled to delta * ptp(clean ECG) where delta = randint(20, 200) /
+    # 100 per window (noise_sampling: deepfilter + integer_percent_uniform).
+    # robustness_alpha_values is a separate discrete grid used only by
+    # Experiment 2 (exp2-strength sweep), matching DeepFilter / MECG-E's
+    # reported noise-amplitude bins.
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform
@@ -97,17 +97,23 @@ dataset:
   eps: 1.0e-10
 
 model:
+  # Official fperdigon/DeepFilter deep_filter_model_I_LANL_dilated: 6 MKLANL
+  # modules (N = 64,64,32,32,16,16), dilated at positions 2/4/6, each module
+  # followed by Dropout(0.4) then BatchNorm, then a kernel-9 linear conv.
   input_channels: 1
   layers: [64, 64, 32, 32, 16, 16]
   dilated_pattern: [False, True, False, True, False, True]
+  # Non-dilated module: kernels 3/5/9/15 (8 branches, N/8 filters each).
   kernels: [3, 5, 9, 15]
-  dilated_kernels: [3, 5, 9, 15]
+  # Dilated module (LANLFilter_module_dilated): kernels 5/9/15 only -- NO
+  # kernel-3 branch -- so 6 branches of N/6 filters each, at dilation_rate 3.
+  dilated_kernels: [5, 9, 15]
   dilation: 3
   dropout: 0.4
   output_kernel_size: 9
-  # DeepFilter paper-faithful loss (Eq. 2 / official combined_ssd_mad_loss):
-  # L = ssd_weight * sum(error^2) + mad_weight * max(error^2); mad_weight is
-  # the paper's empirically found balance term lambda=50.
+  # DeepFilter paper-faithful loss (Eq. 2 / official combined_ssd_mad_loss =
+  # `max(err^2)*50 + sum(err^2)` over the time axis): mad_weight is the
+  # paper's empirically found balance term lambda=50.
   loss_fn: "ssd+mad"
   ssd_weight: 1.0
   mad_weight: 50.0

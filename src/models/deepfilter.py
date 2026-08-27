@@ -8,6 +8,26 @@ except ImportError:
     from factory import register_model
 
 
+# The official DeepFilter (fperdigon/DeepFilter) is Keras/TensorFlow. Keras
+# layer defaults differ from PyTorch's, so this port pins them for a faithful
+# reproduction:
+#   - Conv1D kernel_initializer='glorot_uniform', bias_initializer='zeros'
+#   - BatchNormalization momentum=0.99 (== PyTorch momentum 0.01), epsilon=1e-3
+_KERAS_BN_EPS = 1e-3
+_KERAS_BN_MOMENTUM = 0.01
+
+
+def _keras_bn(num_features):
+    return nn.BatchNorm1d(int(num_features), eps=_KERAS_BN_EPS, momentum=_KERAS_BN_MOMENTUM)
+
+
+def _keras_init(module):
+    if isinstance(module, nn.Conv1d):
+        nn.init.xavier_uniform_(module.weight)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+
+
 class _ConvBranch(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, dilation=1, activation="linear"):
         super().__init__()
@@ -52,7 +72,10 @@ class LANLFilterModule(nn.Module):
 
 
 class DilatedLANLFilterModule(nn.Module):
-    def __init__(self, in_channels, layers, kernels=(3, 5, 9, 15), dilation=3):
+    # Official LANLFilter_module_dilated: only 3 kernels (5, 9, 15) -- no
+    # kernel-3 branch -- so 6 branches (3 linear + 3 ReLU) of `layers // 6`
+    # filters each, all at dilation_rate=3.
+    def __init__(self, in_channels, layers, kernels=(5, 9, 15), dilation=3):
         super().__init__()
         branch_channels = int(layers) // (2 * len(kernels))
         self.out_channels = branch_channels * 2 * len(kernels)
@@ -78,7 +101,7 @@ class _DeepFilterBlock(nn.Module):
         layers,
         dilated=False,
         kernels=(3, 5, 9, 15),
-        dilated_kernels=(3, 5, 9, 15),
+        dilated_kernels=(5, 9, 15),
         dilation=3,
         dropout=0.4,
     ):
@@ -93,21 +116,38 @@ class _DeepFilterBlock(nn.Module):
         else:
             self.filter = LANLFilterModule(in_channels, layers, kernels=kernels)
         self.dropout = nn.Dropout(float(dropout))
-        self.norm = nn.BatchNorm1d(self.filter.out_channels)
+        self.norm = _keras_bn(self.filter.out_channels)
         self.out_channels = self.filter.out_channels
 
     def forward(self, x):
+        # Official order: MKLANL module -> Dropout(0.4) -> BatchNormalization.
         return self.norm(self.dropout(self.filter(x)))
 
 
 @register_model("deepfilter")
 class DeepFilterDenoiser(nn.Module):
-    """PyTorch port of the official DeepFilter multibranch LANL-dilated model.
+    """PyTorch port of the official DeepFilter multibranch LANL-dilated model
+    (fperdigon/DeepFilter `deep_filter_model_I_LANL_dilated`).
 
-    Loss (Romero et al. 2021, Eq. 2 / official fperdigon/DeepFilter
-    combined_ssd_mad_loss): mad_weight defaults to the paper's empirically
-    found balance term lambda=50, and the MAD term is squared error at the
-    point of maximum deviation (see compute_loss).
+    Architecture matches the released Keras code exactly: 6 MKLANL modules in
+    sequence (N = 64, 64, 32, 32, 16, 16), each followed by Dropout(0.4) then
+    BatchNorm, then a final kernel-9 linear conv. Non-dilated modules have 8
+    branches (linear+ReLU x kernels 3/5/9/15, N/8 filters each); dilated
+    modules (positions 2/4/6) have 6 branches (linear+ReLU x kernels 5/9/15,
+    N/6 filters each) at dilation_rate=3. Keras layer defaults are pinned
+    (glorot-uniform weights, BN momentum 0.99 / eps 1e-3).
+
+    Loss (Romero et al. 2021, Eq. 2 / official combined_ssd_mad_loss =
+    `max(sq)*50 + sum(sq)` over the time axis): mad_weight defaults to the
+    paper's empirically found balance term lambda=50, and the MAD term is
+    squared error at the point of maximum deviation (see compute_loss).
+
+    Task-defined differences, shared by every baseline here: training data is
+    PTB-XL Lead II (paper: QT Database) and windows are fixed 512-sample
+    slices rather than annotated heartbeats zero-padded to 512 -- the paper's
+    360 Hz rate, endpoint-centering, 512 length and peak-to-peak noise
+    scaling ~U(0.2, 2.0) are all reproduced by the shared preprocessing, so
+    this model stays in the main comparison table.
     """
 
     def __init__(
@@ -116,7 +156,7 @@ class DeepFilterDenoiser(nn.Module):
         layers=(64, 64, 32, 32, 16, 16),
         dilated_pattern=(False, True, False, True, False, True),
         kernels=(3, 5, 9, 15),
-        dilated_kernels=(3, 5, 9, 15),
+        dilated_kernels=(5, 9, 15),
         dilation=3,
         dropout=0.4,
         output_kernel_size=9,
@@ -160,6 +200,8 @@ class DeepFilterDenoiser(nn.Module):
             stride=1,
             padding=(int(output_kernel_size) - 1) // 2,
         )
+
+        self.apply(_keras_init)
 
     def forward(self, x):
         squeeze = False

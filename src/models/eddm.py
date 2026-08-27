@@ -248,12 +248,14 @@ class EDDMDenoiser(nn.Module):
     colored (ECG) noise for the whole trajectory and eps ~ N(0, I) is
     resampled per step. Per-step coefficients alpha_t (colored-noise branch)
     and beta_t (Gaussian branch) both follow the paper's "linear decrease"
-    strategy (Section IV-C2); alpha_t is additionally normalized so that
-    alpha_bar_T = sum(alpha_1..T) = 1, which the paper requires so that the
-    diffusion endpoint x_T equals the noisy ECG plus a small residual
-    Gaussian perturbation (x_T = x_tilde + eps), not pure Gaussian noise as
-    in standard DDPM. beta_t is scaled by `gaussian_scale` since the paper
-    does not give an absolute magnitude for the white-noise branch.
+    strategy (Section IV-C2), normalized to the paper's two endpoint
+    constraints:
+      sum(alpha_1..T)  = 1  ->  alpha_bar_T = 1  (Eq. 5)
+      sum(beta_1..T^2) = 1  ->  beta_bar_T  = 1  (Section III-B: x_T =
+                                                  x_tilde + eps exactly, not
+                                                  a scaled-down perturbation)
+    `gaussian_scale` (default 1.0 = paper-faithful) rescales beta_bar_T, i.e.
+    the std of the white noise present at the diffusion endpoint.
 
     The reverse process (Algorithm 2 / Eq. 6-7) is a *stochastic* ancestral
     sampler -- x_{t-1} = x_t - alpha_t*e_hat - (beta_t^2/beta_bar_t)*eps_hat
@@ -264,10 +266,21 @@ class EDDMDenoiser(nn.Module):
     the reverse process k times and averaging, see `num_shots`) meaningful
     at all: a deterministic reverse process would produce identical repeats.
 
-    Note: the paper does not have a public reference implementation, so the
-    specific closed-form used to construct linearly-decreasing alpha_t/beta_t
-    (normalized to sum to 1) is this port's best-effort reconstruction of the
-    stated design constraints, not a verified copy of released code.
+    Verified against the paper: dual-path diffusion (Eq. 5), reverse update
+    (Eq. 7) x_{t-1} = x_t - alpha_t*e_hat - (beta_t^2/beta_bar_t)*eps_hat +
+    sigma_t*eps' with sigma_t^2 = beta_t^2 * beta_bar_{t-1}^2 / beta_bar_t^2
+    (Eq. 6), L2 dual-noise-prediction loss (Eq. 8, unweighted), conditioning
+    on (x_t, alpha_bar_t, beta_bar_t, x_tilde), T=50, two 1-D U-Nets with
+    four DownBlocks + self-attention mid-block + a DAPP module on the first
+    skip connection, RAdam / lr 1e-5 / batch 64, and the "EDDM-k" multifold
+    ensemble (Sec. IV-C2, `num_shots`).
+
+    Not verifiable (no public reference implementation): the exact closed
+    form of the linear-decrease alpha_t/beta_t ramp, the DAPP pool scales
+    (Fig. 3 shows 3/5/9 + global, the text says "five pooling layers" -- we
+    keep 3/5/9/15 + global, matching the DeepFilter multi-kernel design the
+    paper cites), and the U-Net channel widths / attention-head count (the
+    paper gives none).
     """
 
     def __init__(
@@ -278,7 +291,7 @@ class EDDMDenoiser(nn.Module):
         channel_mults=(1, 2, 4, 8),
         time_dim=256,
         dropout=0.0,
-        gaussian_scale=0.2,
+        gaussian_scale=1.0,
         ecg_noise_weight=1.0,
         gaussian_noise_weight=1.0,
         pool_scales=(3, 5, 9, 15),
@@ -312,11 +325,15 @@ class EDDMDenoiser(nn.Module):
 
         T = self.timesteps
         step_index = torch.arange(1, T + 1, dtype=torch.float64)
-        # Linearly decreasing positive weights over t=1..T, normalized to
-        # sum to 1 (Eq. 5's alpha_bar_T = 1 requirement).
-        linear_decreasing_weights = (T - step_index + 1) / (T * (T + 1) / 2.0)
-        alpha_t = linear_decreasing_weights.to(torch.float32)
-        beta_t = (self.gaussian_scale * linear_decreasing_weights).to(torch.float32)
+        # "Linear decrease" schedule (Sec. IV-C2): both sequences ramp down
+        # linearly over t = 1..T. Normalisations enforce the paper's endpoint
+        # constraints -- sum(alpha_t) = 1 (alpha_bar_T = 1, Eq. 5) and
+        # sum(beta_t^2) = 1 (beta_bar_T = 1, so x_T = x_tilde + eps exactly).
+        linear_decrease = T - step_index + 1.0  # T, T-1, ..., 1
+        alpha_t = (linear_decrease / linear_decrease.sum()).to(torch.float32)
+        beta_t = (
+            self.gaussian_scale * linear_decrease / linear_decrease.pow(2).sum().sqrt()
+        ).to(torch.float32)
 
         alpha_bar = torch.cumsum(alpha_t, dim=0)
         beta_bar = torch.sqrt(torch.cumsum(beta_t.pow(2), dim=0))

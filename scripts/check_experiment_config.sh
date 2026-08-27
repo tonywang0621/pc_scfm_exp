@@ -55,13 +55,17 @@ EXPECTED = {
     ("dataset", "clean_reference", "filter_order"): 4,
     ("dataset", "clean_reference", "zero_phase"): True,
     ("dataset", "clean_reference", "bandpass_hz"): [0.05, 40.0],
-    ("dataset", "resample_hz"): 250,
+    # Shared preprocessing (every config -- baselines, ablations, proposed
+    # model -- reads the SAME processed/*.npz, built by preprocess_ecg.py from
+    # the DeepFilter-family benchmark spec).
+    ("dataset", "resample_hz"): 360,
     ("dataset", "window_size"): 512,
     ("dataset", "overlap_ratio"): 0.0,
-    ("dataset", "normalization"): "z_score",
+    ("dataset", "normalization"): "endpoint_center",
     ("dataset", "baseline_wander", "train_source"): "nstdb",
     ("dataset", "baseline_wander", "alpha_mode"): "peak_to_peak_ratio",
-    ("dataset", "baseline_wander", "alpha_sampling"): "uniform_range",
+    ("dataset", "baseline_wander", "noise_sampling"): "deepfilter",
+    ("dataset", "baseline_wander", "alpha_sampling"): "integer_percent_uniform",
     ("dataset", "baseline_wander", "alpha_values"): [0.2, 2.0],
     ("dataset", "baseline_wander", "robustness_alpha_values"): [0.2, 0.6, 1.0, 1.5, 2.0],
     ("dataset", "baseline_wander", "controlled_frequencies_hz"): [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0],
@@ -72,6 +76,13 @@ EXPECTED = {
         "random_low_frequency_drift",
     ],
     ("dataset", "eps"): 1.0e-10,
+}
+
+# STFT-domain backbone params shared by MECG-E and every MambAttention /
+# PC-SCFM variant (they are all TF-Bi-Mamba models). Checked only for those
+# models -- the classical filters and the DeepFilter-family CNN/RNN/diffusion
+# baselines do not have an STFT front end.
+STFT_MODEL_KEYS = {
     ("model", "fea"): "pha",
     ("model", "norm"): False,
     ("model", "compress_factor"): 0.3,
@@ -80,7 +91,7 @@ EXPECTED = {
     ("model", "d_conv"): 4,
     ("model", "expand"): 4,
     ("model", "norm_epsilon"): 1.0e-5,
-    ("model", "sampling_rate"): 250,
+    ("model", "sampling_rate"): 360,
     ("model", "n_fft"): 64,
     ("model", "hop_size"): 8,
     ("model", "win_size"): 64,
@@ -316,38 +327,51 @@ EXPECTED_BY_MODEL = {
         ("model", "pcscfm_enabled"): True,
     },
     "eddm": {
-        ("model", "dense_channel"): 64,
         ("model", "timesteps"): 50,
         ("model", "num_shots"): 1,
         ("model", "base_channels"): 64,
         ("model", "channel_mults"): [1, 2, 4, 8],
         ("model", "time_dim"): 256,
         ("model", "dropout"): 0.0,
-        ("model", "gaussian_scale"): 0.2,
+        # beta_bar_T = 1 (x_T = x_tilde + eps, paper Sec. III-B).
+        ("model", "gaussian_scale"): 1.0,
         ("model", "ecg_noise_weight"): 1.0,
         ("model", "gaussian_noise_weight"): 1.0,
         ("model", "pool_scales"): [3, 5, 9, 15],
         ("model", "attention_heads"): 4,
     },
     "fir_filter": {
-        ("model", "dense_channel"): 64,
+        # Official DeepFilter FIR (Romero et al. 2021 Sec. 5.2): numtaps 8079
+        # (fir_order 8078 + 1), Kaiser beta 2.187 (== kaiser_beta(30.5 dB)),
+        # cutoff 0.67 Hz, zero-phase, DeepFilter short-signal padding, 150 Hz
+        # low-pass post stage.
         ("model", "filter_kind"): "fir",
         ("model", "cutoff_hz"): 0.67,
-        ("model", "fir_order"): 56,
+        ("model", "fir_design"): "fixed_order",
+        ("model", "fir_order"): 8078,
         ("model", "fir_window"): "kaiser",
-        ("model", "kaiser_beta"): 2.18,
+        ("model", "kaiser_beta"): 2.187,
+        ("model", "transition_width_hz"): 0.07,
         ("model", "zero_phase"): True,
+        ("model", "allow_causal_fallback"): False,
+        ("model", "short_signal_mode"): "deepfilter_pad",
+        ("model", "post_lowpass_hz"): 150.0,
     },
     "iir_filter": {
-        ("model", "dense_channel"): 64,
+        # Official DeepFilter IIR (Romero et al. 2021 Sec. 5.2 /
+        # digitalFilters/dfilters.py IIRRemoveBL): order-4 Butterworth
+        # high-pass, cutoff 0.67 Hz, zero-phase (filtfilt), 150 Hz low-pass
+        # post stage.
         ("model", "filter_kind"): "iir",
         ("model", "cutoff_hz"): 0.67,
         ("model", "iir_order"): 4,
         ("model", "iir_method"): "butterworth",
         ("model", "zero_phase"): True,
+        ("model", "allow_causal_fallback"): False,
+        ("model", "short_signal_mode"): "deepfilter_pad",
+        ("model", "post_lowpass_hz"): 150.0,
     },
     "drnn": {
-        ("model", "dense_channel"): 64,
         ("model", "input_size"): 1,
         ("model", "lstm_hidden_sizes"): [64],
         ("model", "dense_layers"): [64, 64],
@@ -357,7 +381,6 @@ EXPECTED_BY_MODEL = {
         ("model", "loss_fn"): "mse",
     },
     "fcn_dae": {
-        ("model", "dense_channel"): 64,
         ("model", "input_channels"): 1,
         ("model", "kernel_size"): 16,
         ("model", "encoder_channels"): [40, 20, 20, 20, 40, 1],
@@ -367,12 +390,12 @@ EXPECTED_BY_MODEL = {
         ("model", "loss_fn"): "mse",
     },
     "deepfilter": {
-        ("model", "dense_channel"): 64,
         ("model", "input_channels"): 1,
         ("model", "layers"): [64, 64, 32, 32, 16, 16],
         ("model", "dilated_pattern"): [False, True, False, True, False, True],
         ("model", "kernels"): [3, 5, 9, 15],
-        ("model", "dilated_kernels"): [3, 5, 9, 15],
+        # Official LANLFilter_module_dilated drops the kernel-3 branch.
+        ("model", "dilated_kernels"): [5, 9, 15],
         ("model", "dilation"): 3,
         ("model", "dropout"): 0.4,
         ("model", "output_kernel_size"): 9,
@@ -423,26 +446,90 @@ EXPECTED_BY_MODEL = {
 # "gamma" when scheduler is "none" or "ReduceLROnPlateau").
 EXPECTED_TRAINING_BY_MODEL = {
     "mecg_e": {
-        # MECG-E (Hung et al. 2024): AdamW/lr/betas/scheduler already match
-        # the generic recipe; only weight_decay is paper-specific (matches
-        # AdamW's own default of 1e-2, made explicit here).
+        # MECG-E (Hung et al. 2024 / official pipeline.py): AdamW/lr/betas/
+        # scheduler already match the generic recipe. weight_decay 1e-2 is
+        # AdamW's own default (which the official code relies on). grad_clip
+        # null: official code has clipping commented out. Epoch budget raised
+        # from the paper's 30 to 500 + patient EarlyStopping so MECG-E fully
+        # converges on the larger PTB-XL training set.
+        ("training", "train_epochs"): 500,
         ("training", "weight_decay"): 1.0e-2,
+        ("training", "grad_clip_norm"): None,
+        ("training", "early_stopping_patience_epochs"): 20,
+        ("training", "early_stopping_min_delta"): 1.0e-5,
     },
     "eddm": {
-        # EDDM (Li et al. 2025, Section IV-C2): RAdam, lr=1e-5, batch=64, no
-        # LR schedule stated in the paper.
+        # EDDM (Li et al. 2025, Section IV-C2): RAdam, lr=1e-5, batch=64. The
+        # paper's LR "adaptively adjusts" (RAdam warmup) and gives no epoch
+        # budget; a ReduceLROnPlateau schedule + patient EarlyStopping
+        # (min_delta 1e-5) are added so it anneals to convergence.
         ("training", "batch_size"): 64,
         ("training", "lr"): 1.0e-5,
         ("training", "optimizer"): "RAdam",
         ("training", "betas"): [0.9, 0.999],
         ("training", "weight_decay"): 0.0,
-        ("training", "scheduler"): "none",
+        ("training", "scheduler"): "ReduceLROnPlateau",
         ("training", "gamma"): None,
+        ("training", "factor"): 0.5,
+        ("training", "lr_scheduler_patience_epochs"): 5,
+        ("training", "min_lr"): 1.0e-7,
+        ("training", "early_stopping_min_delta"): 1.0e-5,
         ("training", "save_every_epochs"): 50,
     },
     "deepfilter": {
-        # DeepFilter (Romero et al. 2021, Section 5.3): Adam, lr=1e-3,
-        # batch=128, ReduceLROnPlateau(factor=0.5, patience=2, min_lr=1e-10).
+        # DeepFilter (Romero et al. 2021 / official dl_pipeline.py): Adam,
+        # lr=1e-3, batch=128, ReduceLROnPlateau(factor=0.5, patience=2,
+        # min_lr=1e-10, min_delta=0.05 on val_loss), max 1e5 epochs,
+        # EarlyStopping(patience=10, min_delta=0.05). The SSD-scale loss
+        # makes the 0.05 thresholds meaningful (unlike the MSE-loss models).
+        ("training", "train_epochs"): 100000,
+        ("training", "batch_size"): 128,
+        ("training", "lr"): 1.0e-3,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "ReduceLROnPlateau",
+        ("training", "gamma"): None,
+        ("training", "factor"): 0.5,
+        ("training", "lr_scheduler_patience_epochs"): 2,
+        ("training", "lr_scheduler_min_delta"): 0.05,
+        ("training", "min_lr"): 1.0e-10,
+        ("training", "early_stopping_patience_epochs"): 10,
+        ("training", "early_stopping_min_delta"): 0.05,
+        ("training", "save_every_epochs"): 50,
+        ("training", "grad_clip_norm"): None,
+    },
+    "drnn": {
+        # DRNN (Antczak 2018, Section 3.1): Adam, batch 64, MSE, no L2 / no
+        # dropout, no lr stated (kept 1e-3). Antczak states no LR schedule,
+        # but a fixed LR leaves the LSTM oscillating, so ReduceLROnPlateau
+        # (as in the DeepFilter DRNN reproduction) + patient EarlyStopping
+        # are added for convergence. Synthetic pretraining not reproduced.
+        ("training", "train_epochs"): 50000,
+        ("training", "batch_size"): 64,
+        ("training", "lr"): 1.0e-3,
+        ("training", "optimizer"): "Adam",
+        ("training", "betas"): [0.9, 0.999],
+        ("training", "weight_decay"): 0.0,
+        ("training", "scheduler"): "ReduceLROnPlateau",
+        ("training", "gamma"): None,
+        ("training", "factor"): 0.5,
+        ("training", "lr_scheduler_patience_epochs"): 3,
+        ("training", "min_lr"): 1.0e-8,
+        ("training", "early_stopping_patience_epochs"): 20,
+        ("training", "early_stopping_min_delta"): 1.0e-5,
+        ("training", "save_every_epochs"): 50,
+        ("training", "grad_clip_norm"): None,
+        ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
+    },
+    "fcn_dae": {
+        # FCN-DAE (Chiang et al. 2019): Adam + MSE are the only training
+        # choices the paper pins. Unspecified hyper-parameters follow the
+        # DeepFilter reproduction's released code (dl_pipeline.py, applied to
+        # every DL baseline): batch 128, lr 1e-3, ReduceLROnPlateau(factor
+        # 0.5, patience 2, min_lr 1e-10), max 1e5 epochs, EarlyStopping
+        # patience 10 -- same as the drnn / deepfilter configs.
+        ("training", "train_epochs"): 100000,
         ("training", "batch_size"): 128,
         ("training", "lr"): 1.0e-3,
         ("training", "optimizer"): "Adam",
@@ -453,35 +540,19 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "factor"): 0.5,
         ("training", "lr_scheduler_patience_epochs"): 2,
         ("training", "min_lr"): 1.0e-10,
+        ("training", "early_stopping_patience_epochs"): 10,
+        ("training", "early_stopping_min_delta"): 1.0e-5,
         ("training", "save_every_epochs"): 50,
-    },
-    "drnn": {
-        # DRNN (Antczak 2018): Adam, batch=64; paper does not report lr/LR
-        # schedule, so those stay at this project's standard defaults.
-        ("training", "batch_size"): 64,
-        ("training", "optimizer"): "Adam",
-        ("training", "betas"): [0.9, 0.999],
-        ("training", "weight_decay"): 0.0,
-        ("training", "scheduler"): "none",
-        ("training", "gamma"): None,
-        ("training", "save_every_epochs"): 50,
-        ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
-    },
-    "fcn_dae": {
-        # FCN-DAE: Adam, batch=32, StepLR(step_size=200, gamma=0.5).
-        ("training", "batch_size"): 32,
-        ("training", "optimizer"): "Adam",
-        ("training", "betas"): [0.9, 0.999],
-        ("training", "weight_decay"): 0.0,
-        ("training", "scheduler"): "StepLR",
-        ("training", "step_size"): 200,
-        ("training", "gamma"): 0.5,
-        ("training", "save_every_epochs"): 50,
+        ("training", "grad_clip_norm"): None,
         ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
     },
     "descod_ecg_1shot": {
-        # DeScoD-ECG (Li et al. 2023, Section IV-C): Adam, lr=1e-3,
-        # StepLR(step_size=150, gamma=0.1).
+        # DeScoD-ECG (Li et al. 2023, Section IV-C / official utils.py): Adam,
+        # lr=1e-3, StepLR(step_size=150, gamma=0.1), fixed 400 epochs, NO
+        # early stopping (lowest-val-loss checkpoint). All three shot variants
+        # share this recipe (num_shots is inference-only).
+        ("training", "train_epochs"): 400,
+        ("training", "early_stopping_patience_epochs"): None,
         ("training", "lr"): 1.0e-3,
         ("training", "optimizer"): "Adam",
         ("training", "betas"): [0.9, 0.999],
@@ -492,6 +563,8 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "save_every_epochs"): 20,
     },
     "descod_ecg_5shot": {
+        ("training", "train_epochs"): 400,
+        ("training", "early_stopping_patience_epochs"): None,
         ("training", "lr"): 1.0e-3,
         ("training", "optimizer"): "Adam",
         ("training", "betas"): [0.9, 0.999],
@@ -502,6 +575,8 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "save_every_epochs"): 20,
     },
     "descod_ecg_10shot": {
+        ("training", "train_epochs"): 400,
+        ("training", "early_stopping_patience_epochs"): None,
         ("training", "lr"): 1.0e-3,
         ("training", "optimizer"): "Adam",
         ("training", "betas"): [0.9, 0.999],
@@ -510,6 +585,21 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "step_size"): 150,
         ("training", "gamma"): 0.1,
         ("training", "save_every_epochs"): 20,
+    },
+    "mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg": {
+        # Proposed method -- tuned for convergence (see the config comment):
+        # ReduceLROnPlateau + very patient EarlyStopping instead of the
+        # generic ExponentialLR(0.99). Same validation fold / selection rule
+        # as the baselines. Dataset preprocessing now matches the 8 baselines
+        # (360 Hz / endpoint-center / DeepFilter integer-percent noise).
+        ("training", "scheduler"): "ReduceLROnPlateau",
+        ("training", "gamma"): None,
+        ("training", "factor"): 0.5,
+        ("training", "lr_scheduler_patience_epochs"): 5,
+        ("training", "min_lr"): 1.0e-7,
+        ("training", "early_stopping_patience_epochs"): 30,
+        ("training", "early_stopping_min_delta"): 1.0e-5,
+        ("training", "grad_clip_norm"): 1.0,
     },
 }
 
@@ -629,8 +719,6 @@ for path in CONFIGS:
     training_overrides = EXPECTED_TRAINING_BY_MODEL.get(model_name, {})
 
     for key_path, expected in EXPECTED.items():
-        if model_name in {"descod_ecg_1shot", "descod_ecg_5shot", "descod_ecg_10shot"} and key_path[0] == "model":
-            continue
         if key_path in training_overrides:
             continue
         check_value(errors, data, key_path, expected, name)
@@ -640,6 +728,10 @@ for path in CONFIGS:
 
     for key_path, expected in EXPECTED_BY_MODEL.get(model_name, {}).items():
         check_value(errors, data, key_path, expected, name)
+
+    if model_name == "mecg_e" or model_name == "pc_scfm" or model_name in MAMBATTENTION_MODEL_NAMES:
+        for key_path, expected in STFT_MODEL_KEYS.items():
+            check_value(errors, data, key_path, expected, name)
 
     if model_name in DUALPATH_DAPP_HEAD_SWEEP_MODELS:
         base_expectations = EXPECTED_BY_MODEL["mambattention_stfrft_dualpath_dapp_ecg"]
