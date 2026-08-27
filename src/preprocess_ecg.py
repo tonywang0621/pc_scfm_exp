@@ -202,7 +202,8 @@ def rdrecord_with_sanitized_record_line(wfdb, path):
     with tempfile.TemporaryDirectory(prefix="wfdb_header_") as tmp:
         tmp_dir = Path(tmp)
         tmp_header = tmp_dir / header_path.name
-        tmp_header.write_text(" ".join(fields[:4]) + "\n" + "".join(lines[1:]), encoding="utf-8")
+        sanitized_fields = [tmp_header.stem, *fields[1:4]]
+        tmp_header.write_text(" ".join(sanitized_fields) + "\n" + "".join(lines[1:]), encoding="utf-8")
 
         linked_files = {tmp_header.name}
         for line in lines[1 : 1 + n_sig]:
@@ -217,7 +218,14 @@ def rdrecord_with_sanitized_record_line(wfdb, path):
                 link_or_copy_for_wfdb(src, tmp_dir / signal_file)
                 linked_files.add(signal_file)
 
-        return wfdb.rdrecord(str(tmp_dir / record_path.name))
+        try:
+            return wfdb.rdrecord(str(tmp_dir / record_path.name))
+        except ValueError as exc:
+            raise ValueError(
+                f"WFDB fallback also failed for {header_path}. "
+                f"Original record line was: {lines[0].strip()!r}. "
+                f"Sanitized record line was: {' '.join(sanitized_fields)!r}."
+            ) from exc
 
 
 def load_record(path):
