@@ -26,9 +26,8 @@ training:
   # Antczak specifies no LR schedule, but a fixed LR leaves an LSTM denoiser
   # oscillating around the optimum; ReduceLROnPlateau (the schedule the
   # DeepFilter DRNN reproduction also uses) is added so it anneals to a tight
-  # minimum. EarlyStopping is deliberately patient (min_delta 1e-5) so it
-  # never stops before convergence; the best-val checkpoint is saved
-  # throughout.
+  # minimum. Unified convergence-controlled benchmark selection uses
+  # validation PRD with the shared patience/min_delta policy.
   train_epochs: 50000
   batch_size: 64
   lr: 1.0e-3
@@ -45,8 +44,8 @@ training:
   validation_metrics_every_epochs: 1
   save_every_epochs: 50
   early_stopping_patience_epochs: 20
-  early_stopping_min_delta: 1.0e-5
-  selection_metric: val_loss
+  early_stopping_min_delta: 1.0e-4
+  selection_metric: val_prd
   progress_bar: True
   resume: False
   resume_checkpoint: null

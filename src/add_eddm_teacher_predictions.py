@@ -68,7 +68,7 @@ def main():
             print(f"skip existing {args.teacher_key}: {src}")
             continue
 
-        restored = run_inference(model, noisy, device=device, batch_size=args.batch_size)
+        restored, _ = run_inference(model, noisy, device=device, batch_size=args.batch_size)
         payload = {key: arrays[key] for key in arrays.files}
         payload[args.teacher_key] = restored.astype(np.float32)
 

@@ -122,6 +122,7 @@ def _save_training_state(
     step,
     best_val_loss,
     best_val_pcc,
+    best_val_prd,
     patience_counter,
     train_losses,
     val_losses,
@@ -137,6 +138,7 @@ def _save_training_state(
             "step": step,
             "best_val_loss": best_val_loss,
             "best_val_pcc": best_val_pcc,
+            "best_val_prd": best_val_prd,
             "patience_counter": patience_counter,
             "train_losses": train_losses,
             "val_losses": val_losses,
@@ -356,14 +358,16 @@ def train():
     val_metric_history = []
     best_val_loss = np.inf
     best_val_pcc = -np.inf
+    best_val_prd = np.inf
     best_model_ckpt = checkpoint_dir / 'best_model.pt'
     best_pcc_model_ckpt = checkpoint_dir / 'best_pcc_model.pt'
+    best_prd_model_ckpt = checkpoint_dir / 'best_prd_model.pt'
     training_state_ckpt = checkpoint_dir / 'training_state.pt'
     skip_training = not bool(getattr(model, "requires_training", True))
 
     selection_metric = str(args.training.get("selection_metric", "val_pcc")).lower()
-    if selection_metric not in {"val_pcc", "val_loss"}:
-        raise ValueError("training.selection_metric must be 'val_pcc' or 'val_loss'.")
+    if selection_metric not in {"val_pcc", "val_loss", "val_prd"}:
+        raise ValueError("training.selection_metric must be 'val_pcc', 'val_loss', or 'val_prd'.")
     patience = args.training.get(
         'early_stopping_patience_epochs',
         args.training.get('early_stopping_patience', 8),
@@ -402,6 +406,7 @@ def train():
             0,
             best_val_loss,
             best_val_pcc,
+            best_val_prd,
             patience_counter,
             train_losses,
             val_losses,
@@ -421,6 +426,7 @@ def train():
         step = int(state.get("step", 0))
         best_val_loss = float(state.get("best_val_loss", best_val_loss))
         best_val_pcc = float(state.get("best_val_pcc", best_val_pcc))
+        best_val_prd = float(state.get("best_val_prd", best_val_prd))
         patience_counter = int(state.get("patience_counter", patience_counter))
         train_losses = list(state.get("train_losses", train_losses))
         val_losses = list(state.get("val_losses", val_losses))
@@ -552,6 +558,11 @@ def train():
 
                     pcc_improved = avg_val_pcc > best_val_pcc + min_delta
                     loss_improved = avg_val_loss is not None and avg_val_loss < best_val_loss - min_delta
+                    prd_improved = (
+                        val_metrics is not None
+                        and val_metrics.get("PRD") is not None
+                        and val_metrics["PRD"] < best_val_prd - min_delta
+                    )
 
                     if pcc_improved:
                         logger.info(f'New best val PCC {avg_val_pcc:.4f} at epoch {current_epoch}! Saving model...')
@@ -563,7 +574,24 @@ def train():
                         best_val_loss = avg_val_loss
                         torch.save(model.state_dict(), best_model_ckpt)
 
-                    primary_improved = pcc_improved if selection_metric == "val_pcc" else loss_improved
+                    if prd_improved:
+                        logger.info(
+                            f'New best val PRD {val_metrics["PRD"]:.4f} at epoch {current_epoch}! Saving model...'
+                        )
+                        best_val_prd = val_metrics["PRD"]
+                        torch.save(model.state_dict(), best_prd_model_ckpt)
+                        if selection_metric == "val_prd":
+                            torch.save(model.state_dict(), best_model_ckpt)
+
+                    if selection_metric == "val_pcc":
+                        primary_improved = pcc_improved
+                        scheduler_metric = -avg_val_pcc
+                    elif selection_metric == "val_prd":
+                        primary_improved = prd_improved
+                        scheduler_metric = val_metrics["PRD"] if val_metrics is not None else None
+                    else:
+                        primary_improved = loss_improved
+                        scheduler_metric = avg_val_loss
                     if primary_improved:
                         patience_counter = 0
                     elif early_stopping_enabled:
@@ -585,6 +613,7 @@ def train():
                             step,
                             best_val_loss,
                             best_val_pcc,
+                            best_val_prd,
                             patience_counter,
                             train_losses,
                             val_losses,
@@ -603,6 +632,7 @@ def train():
                         current_step,
                         best_val_loss,
                         best_val_pcc,
+                        best_val_prd,
                         patience_counter,
                         train_losses,
                         val_losses,
@@ -615,7 +645,7 @@ def train():
                     running_train_loss = 0
                     running_train_steps = 0
                     model.train()
-                    _scheduler_step(scheduler, avg_val_loss)
+                    _scheduler_step(scheduler, scheduler_metric)
                 elif epoch_finished:
                     _scheduler_step(scheduler)
 
@@ -629,6 +659,7 @@ def train():
                         current_step,
                         best_val_loss,
                         best_val_pcc,
+                        best_val_prd,
                         patience_counter,
                         train_losses,
                         val_losses,
@@ -650,6 +681,7 @@ def train():
                         step,
                         best_val_loss,
                         best_val_pcc,
+                        best_val_prd,
                         patience_counter,
                         train_losses,
                         val_losses,
@@ -673,11 +705,19 @@ def train():
     logger.info(
         f"Training complete after {(time.time()-START_TIME)/60:.2f} minutes. "
         f"Best val loss: {best_val_loss:.4f} | Best val PCC: {best_val_pcc:.4f} | "
+        f"Best val PRD: {best_val_prd:.4f} | "
         f"selection_metric={selection_metric}"
     )
     # Final evaluation uses the configured paper/official-code selection metric.
-    primary_ckpt_name = "best_pcc" if selection_metric == "val_pcc" else "best_loss"
-    primary_ckpt_path = best_pcc_model_ckpt if selection_metric == "val_pcc" else best_model_ckpt
+    if selection_metric == "val_pcc":
+        primary_ckpt_name = "best_pcc"
+        primary_ckpt_path = best_pcc_model_ckpt
+    elif selection_metric == "val_prd":
+        primary_ckpt_name = "best_prd"
+        primary_ckpt_path = best_prd_model_ckpt
+    else:
+        primary_ckpt_name = "best_loss"
+        primary_ckpt_path = best_model_ckpt
     eval_checkpoints = [
         (primary_ckpt_name, primary_ckpt_path),
     ]

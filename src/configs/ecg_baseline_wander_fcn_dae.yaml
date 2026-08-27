@@ -26,10 +26,11 @@ training:
   # max 1e5 epochs, EarlyStopping patience 10. (DeepFilter's code trains
   # FCN-DAE with ssd_loss, but the ORIGINAL paper uses MSE, which is what
   # this baseline follows -- see model.loss_fn.)
-  # Deviation: DeepFilter's code monitors these callbacks on the SSD-scale
-  # loss with min_delta 0.05; with MSE loss that threshold would never
-  # register, so the *_min_delta values use this project's 1e-4 scale.
-  train_epochs: 100000
+  # Unified convergence-controlled benchmark: train_epochs is a large cap and
+  # early stopping / checkpoint selection use validation PRD while optimizer,
+  # LR, batch size, and ReduceLROnPlateau remain aligned with the reproduction
+  # recipe.
+  train_epochs: 50000
   batch_size: 128
   lr: 1.0e-3
   optimizer: Adam
@@ -44,9 +45,9 @@ training:
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 50
-  early_stopping_patience_epochs: 10
-  early_stopping_min_delta: 1.0e-5  # patient: never stop before convergence
-  selection_metric: val_loss
+  early_stopping_patience_epochs: 20
+  early_stopping_min_delta: 1.0e-4
+  selection_metric: val_prd
   progress_bar: True
   resume: False
   resume_checkpoint: null

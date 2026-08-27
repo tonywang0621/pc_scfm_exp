@@ -321,6 +321,42 @@ def load_noise_pool(noise_dir, target_fs, window_size, seed, shuffle=True):
     return pool
 
 
+def split_noise_pool(noise_pool, split_cfg, seed):
+    ratios = split_cfg.get("ratio", [0.8, 0.1, 0.1])
+    if len(ratios) != 3:
+        raise ValueError("dataset.baseline_wander.noise_split.ratio must contain train/val/test ratios.")
+    train_ratio, val_ratio, _ = [float(value) for value in ratios]
+    if train_ratio < 0 or val_ratio < 0 or train_ratio + val_ratio > 1.0:
+        raise ValueError("dataset.baseline_wander.noise_split.ratio must be non-negative and sum to <= 1.")
+
+    pool = list(noise_pool)
+    if split_cfg.get("shuffle", True):
+        rng = np.random.default_rng(seed)
+        rng.shuffle(pool)
+
+    n_total = len(pool)
+    n_train = int(round(n_total * train_ratio))
+    n_val = int(round(n_total * val_ratio))
+    n_train = min(n_train, n_total)
+    n_val = min(n_val, n_total - n_train)
+    pools = {
+        "train": pool[:n_train],
+        "val": pool[n_train : n_train + n_val],
+        "test": pool[n_train + n_val :],
+    }
+    if not pools["train"] or not pools["val"] or not pools["test"]:
+        raise ValueError(
+            "NSTDB noise split produced an empty pool. Provide more noise windows or adjust "
+            f"dataset.baseline_wander.noise_split.ratio. Counts: "
+            f"train={len(pools['train'])}, val={len(pools['val'])}, test={len(pools['test'])}."
+        )
+    return pools
+
+
+def noise_pool_name_for_split(split_name):
+    return split_name if split_name in {"train", "val"} else "test"
+
+
 def synthetic_baseline(kind, length, fs, rng, frequencies):
     t = np.arange(length, dtype=np.float32) / float(fs)
     if kind == "sinusoidal":
@@ -520,7 +556,7 @@ def main():
         target_fs,
         window_size,
         args.seed,
-        shuffle=noise_sampling not in {"sequential", "cyclic", "deepfilter"},
+        shuffle=False,
     )
     if str(bw_cfg.get("train_source", "nstdb")).lower() == "nstdb" and not noise_pool:
         raise FileNotFoundError(
@@ -529,7 +565,19 @@ def main():
             "use --baseline-kind sinusoidal/multi_sine/random_low_frequency_drift only for "
             "controlled robustness experiments."
         )
-    noise_index = 0
+    noise_pools = split_noise_pool(
+        noise_pool,
+        bw_cfg.get("noise_split", {"ratio": [0.8, 0.1, 0.1], "shuffle": True}),
+        args.seed,
+    ) if noise_pool else {}
+    if noise_pools:
+        print(
+            "NSTDB noise split: "
+            f"train={len(noise_pools['train'])}, "
+            f"val={len(noise_pools['val'])}, "
+            f"test={len(noise_pools['test'])}"
+        )
+    noise_indices = {name: 0 for name in noise_pools}
 
     clean_by_split = {}
     noisy_by_split = {}
@@ -573,10 +621,13 @@ def main():
         for window in make_windows(clean, window_size, overlap_ratio):
             normalized = normalize_window(window, dataset_cfg.get("normalization", "z_score"))
             baseline_override = None
+            current_noise_pool = noise_pools.get(noise_pool_name_for_split(split_name), noise_pool)
             if noise_pool and noise_sampling in {"sequential", "cyclic", "deepfilter"}:
-                baseline_override = noise_pool[noise_index]
-                noise_index = (noise_index + 1) % len(noise_pool)
-            noisy = contaminate(normalized, cfg, noise_pool, rng, baseline_override=baseline_override)
+                pool_name = noise_pool_name_for_split(split_name)
+                noise_index = noise_indices.get(pool_name, 0)
+                baseline_override = current_noise_pool[noise_index]
+                noise_indices[pool_name] = (noise_index + 1) % len(current_noise_pool)
+            noisy = contaminate(normalized, cfg, current_noise_pool, rng, baseline_override=baseline_override)
             clean_by_split.setdefault(split_name, []).append(normalized)
             noisy_by_split.setdefault(split_name, []).append(noisy)
             if fold is not None:

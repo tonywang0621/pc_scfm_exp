@@ -88,12 +88,22 @@ def load_npz(path):
 
 def run_inference(model, noisy, device, batch_size):
     preds = []
+    shot_preds = []
     model.eval()
     with torch.no_grad():
         for start in range(0, len(noisy), batch_size):
             batch = torch.from_numpy(noisy[start:start + batch_size]).to(device)
-            preds.append(model(batch).detach().cpu().numpy())
-    return np.concatenate(preds, axis=0)
+            if hasattr(model, "denoising_shots") and getattr(model, "num_shots", 1) > 1:
+                shots = model.denoising_shots(batch)
+                shot_preds.append(shots.detach().cpu().numpy())
+                preds.append(shots.mean(dim=0).detach().cpu().numpy())
+            else:
+                preds.append(model(batch).detach().cpu().numpy())
+    restored = np.concatenate(preds, axis=0)
+    if not shot_preds:
+        return restored, None
+    restored_shots = np.concatenate(shot_preds, axis=1)
+    return restored, restored_shots
 
 
 def load_model_checkpoint(model, checkpoint_path, device):
@@ -175,9 +185,11 @@ def write_csv(path, rows, fieldnames):
         writer.writerows(rows)
 
 
-def write_outputs(output_dir, noisy, restored, clean, rows, summary, has_reference):
+def write_outputs(output_dir, noisy, restored, clean, rows, summary, has_reference, restored_shots=None):
     output_dir.mkdir(parents=True, exist_ok=True)
     arrays = {"noisy_ecg": noisy, "restored_ecg": restored}
+    if restored_shots is not None:
+        arrays["restored_ecg_shots"] = restored_shots
     if clean is not None:
         arrays["clean_reference"] = clean
     np.savez(output_dir / "restored_ecg.npz", **arrays)
@@ -240,7 +252,7 @@ def main():
     noisy, clean, record_ids = load_npz(args.input)
     model = get_model(cfg.model_name, **OmegaConf.to_container(cfg.model, resolve=True)).to(device)
     load_model_checkpoint(model, args.checkpoint, device)
-    restored = run_inference(model, noisy, device=device, batch_size=args.batch_size)
+    restored, restored_shots = run_inference(model, noisy, device=device, batch_size=args.batch_size)
 
     fs = cfg.dataset.get("resample_hz", cfg.model.get("sampling_rate", 250))
     low_freq_hz = (
@@ -250,7 +262,7 @@ def main():
     )
     eps = cfg.dataset.get("eps", 1e-10)
     rows, summary, has_reference = metric_rows(noisy, restored, clean, fs, low_freq_hz, eps, record_ids)
-    write_outputs(output_dir, noisy, restored, clean, rows, summary, has_reference)
+    write_outputs(output_dir, noisy, restored, clean, rows, summary, has_reference, restored_shots)
     print_summary(summary, has_reference)
     print(f"saved restored ECG and metric tables to: {output_dir}")
 

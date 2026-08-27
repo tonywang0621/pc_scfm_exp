@@ -386,8 +386,12 @@ class EDDMDenoiser(nn.Module):
             return self.forward(x)
         # Paper's "EDDM-k" multifold ensemble (Section IV-C2): average k
         # independent stochastic reverse-process runs.
-        samples = torch.stack([self.forward(x) for _ in range(self.num_shots)], dim=0)
+        samples = self.denoising_shots(x)
         return samples.mean(dim=0)
+
+    @torch.no_grad()
+    def denoising_shots(self, x):
+        return torch.stack([self.forward(x) for _ in range(self.num_shots)], dim=0)
 
     def compute_loss(self, batch, device, **kwargs):
         noisy, clean = batch[0].to(device), batch[1].to(device)

@@ -36,6 +36,9 @@ dataset:
   normalization: endpoint_center
   baseline_wander:
     train_source: nstdb
+    noise_split:
+      ratio: [0.8, 0.1, 0.1]
+      shuffle: True
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform

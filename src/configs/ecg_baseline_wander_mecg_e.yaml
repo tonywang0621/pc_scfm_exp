@@ -21,15 +21,10 @@ training:
   # so it is set explicitly here. The official code has gradient clipping
   # commented out -> grad_clip_norm: null (the shared training loop otherwise
   # clips at 1.0).
-  # train_epochs: the paper text says 40, the released config 30 -- both
-  # tuned for the QT Database. On this project's larger PTB-XL training set
-  # (and harder BW-only task) that undertrains, so the budget is raised to
-  # 500 with EarlyStopping(patience 20, min_delta 1e-5 -- deliberately
-  # patient so it never stops short of convergence). ExponentialLR(0.99)
-  # still anneals the LR from the paper's value and the best-val checkpoint
-  # is saved throughout, so the run captures MECG-E's true optimum whether
-  # that lands at epoch 30 or 300.
-  train_epochs: 500
+  # For the unified convergence-controlled benchmark, train_epochs is a large
+  # cap and the best checkpoint is selected by validation PRD while optimizer,
+  # LR, weight decay, and scheduler remain aligned with MECG-E.
+  train_epochs: 50000
   batch_size: 96
   lr: 1.0e-4
   optimizer: AdamW
@@ -42,8 +37,8 @@ training:
   validation_metrics_every_epochs: 1
   save_every_epochs: 5
   early_stopping_patience_epochs: 20
-  early_stopping_min_delta: 1.0e-5
-  selection_metric: val_loss
+  early_stopping_min_delta: 1.0e-4
+  selection_metric: val_prd
   progress_bar: True
   resume: False
   resume_checkpoint: null
