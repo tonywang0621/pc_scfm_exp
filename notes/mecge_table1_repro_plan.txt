@@ -397,30 +397,50 @@ Table 1 reproduction 的結果會同時回報：
 
 Step 6: Robustness
 
-使用同一批 clean QTDB test windows，依照 MECG-E 的 NSTDB baseline wander 加噪方式，
-固定 alpha 掃描：
+100% 對齊 MECG-E / DeepFilter robustness 時，不重新產生固定 alpha test set。
+做法是使用 DeepFilter raw Data_Preparation 產生 test noisy-clean pairs 時保存的：
+
+    rnd_test_nv1.npy
+    rnd_test_nv2.npy
+
+rnd_test 是每個 QTDB test window 當初加 NSTDB baseline wander 時抽到的 noise-amplitude
+level。Robustness 直接使用同一份 QTDB pkl test prediction，依 rnd_test 將 window 分到
+MECG-E / DeepFilter 論文相同區間：
 
     0.2, 0.6, 1.0, 1.5, 2.0
 
-每個 alpha 都計算：
+也就是：
+
+    0.2-0.6
+    0.6-1.0
+    1.0-1.5
+    1.5-2.0
+
+每個區間都計算：
 
     SSD
     MAD
     PRD
     CosSim
 
-每個 seed 都會跑同一套 robustness alpha sweep。
+每個 seed 都會用自己的 QTDB test prediction 做同一套 robustness bin summary。
 
-EDDM 1-shot 也會跑同一套 robustness alpha sweep，但只使用 seed 42。
+EDDM 1-shot 也會跑同一套 robustness bin summary，但只使用 seed 42。
 
-若只使用 MECG-E 官方 processed pkl 而不重新下載 raw NSTDB，robustness test set 會使用
-官方 pkl test split 的 residual：
+raw-data 100% 對齊流程：
 
-    baseline_pool = X_test - y_test
+    raw QTDB + raw NSTDB
+        -> DeepFilter/MECG-E Data_Preparation
+        -> dataset_bw_nv1.pkl / dataset_bw_nv2.pkl
+        -> rnd_test_nv1.npy / rnd_test_nv2.npy
+        -> train model
+        -> evaluate X_test / y_test
+        -> group per-window metrics by rnd_test bins
 
-再對每個 baseline window 重新做 peak-to-peak normalize，並乘上指定 alpha 與 clean ECG
-peak-to-peak range。這讓 Exp2 alpha 區間對齊 MECG-E / DeepFilter protocol，同時不需要重跑
-raw QTDB/NSTDB preprocessing。
+目前實作檔案：
+
+    src/mecge_table1_prepare_deepfilter.py
+    src/mecge_table1_robustness_bins.py
 
 最後整理成：
 
@@ -505,10 +525,6 @@ EDDM 1-shot seed 42 需要產生：
 
 Exp2 robustness 區間必須對齊 MECG-E 論文：
 
-    alpha values: 0.2, 0.6, 1.0, 1.5, 2.0
-
-報告時可整理成：
-
     0.2-0.6
     0.6-1.0
     1.0-1.5
@@ -538,6 +554,15 @@ Exp2 robustness 區間必須對齊 MECG-E 論文：
 
     data/mecge_table1_repro/raw/dataset_bw_nv1.pkl
 
+如果要 100% 對齊 MECG-E / DeepFilter raw preprocessing，先提供 raw QTDB 與 raw NSTDB 路徑。
+在遠端主機上可使用：
+
+    QTDB:
+        /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/QTDB
+
+    NSTDB:
+        /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/NSTDB
+
 執行完整 nv1 實驗：
 
     bash scripts/run_mecge_table1_repro.sh --nv 1 --device cuda:0
@@ -546,19 +571,31 @@ Exp2 robustness 區間必須對齊 MECG-E 論文：
 
 主模型 seed 42：
 
-    bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --device cuda:0
+    bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 \
+      --qtdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/QTDB \
+      --nstdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/NSTDB \
+      --prepare-raw --device cuda:0
 
 主模型 seed 43：
 
-    bash scripts/run_mecge_table1_repro.sh --model main --seed 43 --nv 1 --device cuda:0
+    bash scripts/run_mecge_table1_repro.sh --model main --seed 43 --nv 1 \
+      --qtdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/QTDB \
+      --nstdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/NSTDB \
+      --device cuda:0
 
 主模型 seed 44：
 
-    bash scripts/run_mecge_table1_repro.sh --model main --seed 44 --nv 1 --device cuda:0
+    bash scripts/run_mecge_table1_repro.sh --model main --seed 44 --nv 1 \
+      --qtdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/QTDB \
+      --nstdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/NSTDB \
+      --device cuda:0
 
 EDDM 1-shot seed 42：
 
-    bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 42 --nv 1 --device cuda:0
+    bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 42 --nv 1 \
+      --qtdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/QTDB \
+      --nstdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/NSTDB \
+      --device cuda:0
 
 若要跑 nv2：
 
