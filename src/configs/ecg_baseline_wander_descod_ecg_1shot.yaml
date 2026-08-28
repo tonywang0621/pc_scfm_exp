@@ -17,7 +17,7 @@ training:
   # HuayuLiArizona/Score-based-ECG-Denoising utils.py train()): Adam, initial
   # lr=1e-3, StepLR(step_size=150 epochs, gamma=0.1), batch_size=96.
   # Unified convergence-controlled benchmark: train_epochs is a large cap and
-  # early stopping / checkpoint selection use validation PRD while optimizer,
+  # early stopping / checkpoint selection use each model's validation loss while optimizer,
   # LR, and StepLR remain aligned with the paper/official code.
   train_epochs: 50000
   batch_size: 96
@@ -33,7 +33,7 @@ training:
   save_every_epochs: 20
   early_stopping_patience_epochs: 20
   early_stopping_min_delta: 1.0e-4
-  selection_metric: val_prd
+  selection_metric: val_loss
   progress_bar: True
   resume: False
   resume_checkpoint: null

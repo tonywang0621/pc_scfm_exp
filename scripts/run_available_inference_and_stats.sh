@@ -22,8 +22,8 @@ Usage:
   bash scripts/run_available_inference_and_stats.sh [options]
 
 Runs inference for every model in scripts/experiment_models.sh when both:
-  1. the config-selected checkpoint exists (best_model.pt for val_loss,
-     best_pcc_model.pt for val_pcc; fixed filters need no checkpoint)
+  1. the config-selected checkpoint exists (best_model.pt for val_loss;
+     fixed filters need no checkpoint)
   2. the requested processed dataset NPZ exists
 
 Then runs record-level paired statistics against the baseline model for every
@@ -124,7 +124,7 @@ import yaml
 
 with open(sys.argv[1], encoding="utf-8") as f:
     cfg = yaml.safe_load(f) or {}
-print(str((cfg.get("training") or {}).get("selection_metric", "val_pcc")).lower())
+print(str((cfg.get("training") or {}).get("selection_metric", "val_loss")).lower())
 PY
   )"
   if [[ "$selection_metric" == "val_loss" ]]; then

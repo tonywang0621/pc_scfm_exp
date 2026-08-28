@@ -1,0 +1,582 @@
+MECG-E Table 1 Reproduction / Comparison 實驗計畫
+
+目標
+====
+
+我想做一個和 MECG-E 論文 Table 1 相同實驗 protocol 的對照實驗。
+
+實驗主軸是使用 MECG-E 論文相同的 QT Database clean ECG 與 MIT-BIH Noise Stress Test
+Database (NSTDB) baseline wander noise 設定，訓練並評估我的模型：
+
+    mambattention_stfrft_dualpath_dapp_cfm_unet_bd
+
+最後將結果直接和 MECG-E Table 1 的數字比較，同時也做和 MECG-E 論文一致的
+robustness 實驗，觀察模型在不同 baseline wander noise 強度下的表現。
+
+
+實驗模型
+========
+
+主要模型：
+
+    mambattention_stfrft_dualpath_dapp_cfm_unet_bd
+
+額外 baseline：
+
+    EDDM 1-shot
+
+EDDM 1-shot 只跑 1 個 seed：
+
+    seed 42
+
+EDDM 的定位是已復現過的 diffusion baseline，用來在同一個 MECG-E Table 1 protocol 下和
+MECG-E reported result 以及主要模型做比較。
+
+Multi-seed 設定：
+
+    seed 42
+    seed 43
+    seed 44
+
+這三個 seed 都會使用相同資料、相同加噪 protocol、相同訓練設定與相同 evaluation metrics。
+不會用 seed 來做 hyperparameter tuning，也不會只挑最好 seed 回報。
+
+比較對象：
+
+    MECG-E Table 1 中的 MECG-E (Mag.+Phase) 結果
+
+MECG-E Table 1 主要比較指標：
+
+    SSD
+    MAD
+    PRD
+    CosSim
+
+
+資料設定
+========
+
+MECG-E 論文 Table 1 使用：
+
+    clean ECG: QT Database
+    noise: MIT-BIH Noise Stress Test Database (NSTDB)
+    noise type: baseline wander
+
+我會下載作者或前人已處理好的資料，優先直接使用他們的 processed data。
+目前專案會保留原本 NPZ 讀取方式，同時新增 MECG-E pkl 讀取方式。
+
+如果資料格式是 MECG-E 官方的 dataset_bw_nv1.pkl / dataset_bw_nv2.pkl，可以有兩種做法：
+
+1. 直接在 config 指定 dataset.pkl_file，讓 dataset loader 直接讀 pkl 訓練。
+2. 先把 pkl 轉成目前專案可用的 NPZ 格式，再用原本 NPZ 流程訓練。
+
+正式建議是優先使用直接讀 pkl 的方式做 MECG-E Table 1 reproduction，因為這樣可以更接近
+MECG-E 官方 pipeline；NPZ 流程則保留給既有實驗與需要固定中間資料檔的分析。
+
+目前判斷 MECG-E 是 single-lead denoising，不是把 QTDB 兩個導程當成 2-channel input。
+因此資料處理原則如下：
+
+1. 如果下載資料已經是 [N, 512] 或 [N, 1, 512]，就直接視為 single-lead ECG windows。
+2. 如果資料保留 QTDB 兩個導程，例如 [record, 2, T] 或 [record, T, 2]，則將兩個導程拆開，
+   每個導程各自作為 single-lead sample。
+3. 不會把兩導程資料合併成 [N, 2, T] 丟進模型，因為 MECG-E 與目前專案模型設定都以
+   single-lead input 為主。
+
+若選擇轉成 NPZ，轉換後的資料格式：
+
+    data/mecge_table1_repro/processed/train.npz
+    data/mecge_table1_repro/processed/val.npz
+    data/mecge_table1_repro/processed/test.npz
+
+每個 NPZ 至少包含：
+
+    noisy_ecg
+    clean_reference
+
+建議 shape：
+
+    [N, 1, 512]
+
+
+加噪設定
+========
+
+Table 1 reproduction 使用 MECG-E 論文設定：
+
+    noisy_ecg = clean_reference + alpha * baseline_wander
+
+其中 baseline_wander 來自 NSTDB。
+
+noise scaling 原則：
+
+1. 先將 NSTDB baseline wander segment normalize 到自身 peak-to-peak 範圍。
+2. 再依照 clean ECG 的 peak-to-peak range 做縮放。
+3. alpha 使用 MECG-E / DeepFilter protocol 的 0.2 到 2.0 隨機強度。
+
+主要 Table 1 reproduction：
+
+    alpha random range: 0.2-2.0
+
+Robustness 實驗：
+
+    alpha values: 0.2, 0.6, 1.0, 1.5, 2.0
+
+也可以整理成論文常用區間：
+
+    0.2-0.6
+    0.6-1.0
+    1.0-1.5
+    1.5-2.0
+
+
+實驗隔離
+========
+
+為了避免影響之前已完成或正在進行的實驗，這個實驗會使用獨立資料夾與獨立輸出資料夾。
+
+新資料位置：
+
+    data/mecge_table1_repro/
+        raw/
+        processed/
+        controlled_tests/
+
+新結果位置：
+
+    runs/mecge_table1_repro/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd/
+            seed_42/
+                checkpoint/
+                results/
+                log/
+                controlled_tests/
+            seed_43/
+                checkpoint/
+                results/
+                log/
+                controlled_tests/
+            seed_44/
+                checkpoint/
+                results/
+                log/
+                controlled_tests/
+        eddm_1shot/
+            seed_42/
+                checkpoint/
+                results/
+                log/
+                controlled_tests/
+        analysis/
+            table1_comparison.csv
+            robustness_comparison.csv
+
+結果命名規則
+============
+
+所有訓練、測試與 robustness 結果都必須在資料夾名稱或檔名前標明：
+
+    model
+    dataset / protocol
+    noise version
+    seed
+
+主要命名格式：
+
+    {model}__{dataset_protocol}__{noise_version}__seed{seed}
+
+其中：
+
+    model:
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd
+        eddm_1shot
+
+    dataset_protocol:
+        qtdb_train_qtdb_test
+        qtdb_robustness_alpha_0p2
+        qtdb_robustness_alpha_0p6
+        qtdb_robustness_alpha_1p0
+        qtdb_robustness_alpha_1p5
+        qtdb_robustness_alpha_2p0
+
+    noise_version:
+        nv1
+        nv2
+
+    seed:
+        seed42
+        seed43
+        seed44
+
+主模型結果範例：
+
+    runs/mecge_table1_repro/mambattention_stfrft_dualpath_dapp_cfm_unet_bd/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_train_qtdb_test__nv1__seed42/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_train_qtdb_test__nv1__seed43/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_train_qtdb_test__nv1__seed44/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_robustness_alpha_0p2__nv1__seed42/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_robustness_alpha_0p6__nv1__seed42/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_robustness_alpha_1p0__nv1__seed42/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_robustness_alpha_1p5__nv1__seed42/
+        mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_robustness_alpha_2p0__nv1__seed42/
+
+EDDM 1-shot 結果範例：
+
+    runs/mecge_table1_repro/eddm_1shot/
+        eddm_1shot__qtdb_train_qtdb_test__nv1__seed42/
+        eddm_1shot__qtdb_robustness_alpha_0p2__nv1__seed42/
+        eddm_1shot__qtdb_robustness_alpha_0p6__nv1__seed42/
+        eddm_1shot__qtdb_robustness_alpha_1p0__nv1__seed42/
+        eddm_1shot__qtdb_robustness_alpha_1p5__nv1__seed42/
+        eddm_1shot__qtdb_robustness_alpha_2p0__nv1__seed42/
+
+如果同時跑 MECG-E 官方的兩個 noise version，nv1 與 nv2 必須分開存放，不可覆蓋。
+
+彙整檔命名：
+
+    runs/mecge_table1_repro/analysis/table1_comparison__qtdb_train_qtdb_test__nv1.csv
+    runs/mecge_table1_repro/analysis/robustness_comparison__qtdb__nv1.csv
+    runs/mecge_table1_repro/analysis/table1_comparison__qtdb_train_qtdb_test__nv2.csv
+    runs/mecge_table1_repro/analysis/robustness_comparison__qtdb__nv2.csv
+
+新 config：
+
+    src/configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_cfm_unet_bd.yaml
+    src/configs/mecge_table1_repro_eddm_1shot.yaml
+
+新增執行腳本：
+
+    scripts/run_mecge_table1_repro.sh
+
+這個腳本支援兩種模式：
+
+1. 單一 model / seed job：
+   每次只跑一個模型的一個 seed，並完整完成 QTDB train、QTDB pkl test evaluation、
+   Exp2 robustness。
+
+2. all orchestrator：
+   依序跑完整計畫中的所有 model / seed job，但每個 job 的輸出仍完全分開。
+
+新增 robustness test set 產生器：
+
+    src/mecge_table1_exp2_from_pkl.py
+
+新增結果彙整器：
+
+    src/mecge_table1_collect_results.py
+
+此 config 會從現有：
+
+    src/configs/ecg_baseline_wander_mambattention_stfrft_dualpath_dapp_cfm_unet_bd.yaml
+    src/configs/ecg_baseline_wander_eddm.yaml
+
+複製而來，只修改 data_dir、root_dir、exp_name 與 dataset 設定，不會改動原本 config。
+
+
+建議執行流程
+============
+
+Step 1: 放入下載資料
+
+將 MECG-E Table 1 使用的 processed data 放到：
+
+    data/mecge_table1_repro/raw/
+
+
+Step 2: 檢查資料格式
+
+先寫或執行 inspect script，確認：
+
+    pkl / npz keys
+    train / val / test split
+    array shape
+    dtype
+    是否有 NaN / Inf
+    是否是 single-lead 或 two-lead
+    noisy_ecg 與 clean_reference 是否對齊
+
+
+Step 3: 選擇資料讀取方式
+
+方式 A：直接讀 MECG-E pkl
+
+在 config 中指定：
+
+    dataset.pkl_file: "../data/mecge_table1_repro/raw/dataset_bw_nv1.pkl"
+    dataset.pkl_validation_ratio: 0.3
+    dataset.pkl_validation_random_state: 1
+
+這會對齊 MECG-E 官方 pipeline：
+
+    Dataset = [X_train, y_train, X_test, y_test]
+    X_train / y_train 再用 train_test_split(test_size=0.3, random_state=1) 切出 validation
+
+方式 B：轉成目前專案 NPZ 格式
+
+將官方 processed data 轉成：
+
+    processed/train.npz
+    processed/val.npz
+    processed/test.npz
+
+NPZ 方式會保留給需要固定中間資料檔、方便檢查與重複分析的情境。
+
+
+Step 4: 訓練模型
+
+使用獨立 config 訓練：
+
+    mambattention_stfrft_dualpath_dapp_cfm_unet_bd
+    EDDM 1-shot
+
+主要模型每個 seed 都獨立訓練一次：
+
+    seed 42
+    seed 43
+    seed 44
+
+EDDM 1-shot 只訓練或評估一次：
+
+    seed 42
+
+每個 seed 的 checkpoint、results、log 都分開存放：
+
+    runs/mecge_table1_repro/mambattention_stfrft_dualpath_dapp_cfm_unet_bd/seed_42/
+    runs/mecge_table1_repro/mambattention_stfrft_dualpath_dapp_cfm_unet_bd/seed_43/
+    runs/mecge_table1_repro/mambattention_stfrft_dualpath_dapp_cfm_unet_bd/seed_44/
+    runs/mecge_table1_repro/eddm_1shot/seed_42/
+
+實際實作中會透過 exp_name 和 root_dir 產生帶有 model / dataset / nv / seed 的資料夾：
+
+    runs/mecge_table1_repro/{model}/checkpoint/{model}__qtdb_train_qtdb_test__nv{n}__seed{seed}/
+    runs/mecge_table1_repro/{model}/results/{model}__qtdb_train_qtdb_test__nv{n}__seed{seed}/
+    runs/mecge_table1_repro/{model}/log/{model}__qtdb_train_qtdb_test__nv{n}__seed{seed}/
+
+
+Step 5: Table 1 指標比較
+
+在 QTDB test set 上計算。這裡的 test set 指的是剛下載的 MECG-E 官方 processed pkl
+裡面的 test 部分：
+
+    X_test
+    y_test
+
+也就是官方 pipeline 中：
+
+    Dataset = [X_train, y_train, X_test, y_test]
+
+的 X_test / y_test，不另外重新切 test set。
+
+每個 model / seed 都要計算四個核心指標：
+
+    SSD
+    MAD
+    PRD
+    CosSim
+
+並和 MECG-E Table 1 的 MECG-E Mag.+Phase 結果比較。
+
+Table 1 reproduction 的結果會同時回報：
+
+    MECG-E Table 1 reported result
+    EDDM 1-shot reproduced result, seed 42
+    seed_42 result
+    seed_43 result
+    seed_44 result
+    main model mean over 3 seeds
+    main model std over 3 seeds
+
+注意 MECG-E Table 1 的 mean ± std 通常是 window-level statistics。
+本實驗的 multi-seed summary 會另外提供 seed-level mean ± std。
+如果需要更嚴謹的報告，可以同時列出：
+
+    window-level mean
+    window-level std
+    seed-level mean
+    seed-level std
+
+
+Step 6: Robustness
+
+使用同一批 clean QTDB test windows，依照 MECG-E 的 NSTDB baseline wander 加噪方式，
+固定 alpha 掃描：
+
+    0.2, 0.6, 1.0, 1.5, 2.0
+
+每個 alpha 都計算：
+
+    SSD
+    MAD
+    PRD
+    CosSim
+
+每個 seed 都會跑同一套 robustness alpha sweep。
+
+EDDM 1-shot 也會跑同一套 robustness alpha sweep，但只使用 seed 42。
+
+若只使用 MECG-E 官方 processed pkl 而不重新下載 raw NSTDB，robustness test set 會使用
+官方 pkl test split 的 residual：
+
+    baseline_pool = X_test - y_test
+
+再對每個 baseline window 重新做 peak-to-peak normalize，並乘上指定 alpha 與 clean ECG
+peak-to-peak range。這讓 Exp2 alpha 區間對齊 MECG-E / DeepFilter protocol，同時不需要重跑
+raw QTDB/NSTDB preprocessing。
+
+最後整理成：
+
+    EDDM 1-shot seed 42 robustness result
+    主要模型每個 seed 的 robustness result
+    主要模型 3-seed mean
+    主要模型 3-seed std
+    robustness summary csv
+    robustness line plot
+
+Robustness plot 建議：
+
+    x-axis: alpha
+    y-axis: metric
+    line: 3-seed mean
+    shaded band: seed-level std 或 95% CI
+
+
+Step 7: Loss curve
+
+主模型與 EDDM 都要保存 train loss 與 validation loss 曲線。
+
+主模型：
+
+    mambattention_stfrft_dualpath_dapp_cfm_unet_bd seed 42 train/val loss curve
+    mambattention_stfrft_dualpath_dapp_cfm_unet_bd seed 43 train/val loss curve
+    mambattention_stfrft_dualpath_dapp_cfm_unet_bd seed 44 train/val loss curve
+
+EDDM 1-shot：
+
+    eddm_1shot seed 42 train/val loss curve
+
+每個 seed 的 loss curve 存在各自 result folder，避免互相覆蓋。
+
+建議輸出：
+
+    loss_curve.png
+    training_history.csv
+    training_history.json
+
+loss curve 至少包含：
+
+    train loss
+    val loss
+
+目前實作會額外輸出同圖：
+
+    loss_curves/train_val_loss.png
+
+原本分開的圖也保留：
+
+    loss_curves/train_loss.png
+    loss_curves/val_loss.png
+
+如果 validation metrics 也有記錄，可以額外保存：
+
+    val PRD
+    val CosSim
+
+但正式 Table 1 comparison 只使用 QTDB pkl test split 上的：
+
+    SSD
+    MAD
+    PRD
+    CosSim
+
+
+正式輸出需求總結
+================
+
+主模型每個 seed 都需要產生：
+
+    train loss / val loss plot
+    QTDB pkl test split 的 SSD / MAD / PRD / CosSim
+    MECG-E aligned Exp2 robustness 的 SSD / MAD / PRD / CosSim
+
+EDDM 1-shot seed 42 需要產生：
+
+    train loss / val loss plot
+    QTDB pkl test split 的 SSD / MAD / PRD / CosSim
+    MECG-E aligned Exp2 robustness 的 SSD / MAD / PRD / CosSim
+
+Exp2 robustness 區間必須對齊 MECG-E 論文：
+
+    alpha values: 0.2, 0.6, 1.0, 1.5, 2.0
+
+報告時可整理成：
+
+    0.2-0.6
+    0.6-1.0
+    1.0-1.5
+    1.5-2.0
+
+
+主要注意事項
+============
+
+1. 不動之前的 data/ecg_baseline_wander。
+2. 不動之前的 runs/ecg_baseline_wander。
+3. 不覆蓋任何既有 checkpoint、results、log。
+4. 必須先確認下載資料的 shape，才能決定是否需要拆 QTDB 兩導程。
+5. 比較 MECG-E Table 1 時，要清楚標記哪些數字是論文 reported results，哪些是本地重新訓練結果。
+6. Robustness 加噪方式必須和 MECG-E 論文一致，避免因加噪 protocol 不同造成不公平比較。
+7. Multi-seed 實驗固定使用 seed 42、43、44，最後回報 3-seed mean ± std，不挑最好 seed。
+8. EDDM 1-shot 只跑 seed 42，報告時要標清楚它是 1-shot、1-seed baseline。
+9. 每個 model / seed 都必須輸出 train loss 與 val loss 曲線。
+10. Table 1 test 必須使用 MECG-E 官方 pkl 的 X_test / y_test，不另外重新切 test set。
+11. 正式比較核心指標固定為 SSD、MAD、PRD、CosSim。
+
+
+執行指令
+========
+
+預設使用：
+
+    data/mecge_table1_repro/raw/dataset_bw_nv1.pkl
+
+執行完整 nv1 實驗：
+
+    bash scripts/run_mecge_table1_repro.sh --nv 1 --device cuda:0
+
+建議正式執行時使用單一 model / seed job，避免不同 seed 或不同模型的訓練與結果混在一起。
+
+主模型 seed 42：
+
+    bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --device cuda:0
+
+主模型 seed 43：
+
+    bash scripts/run_mecge_table1_repro.sh --model main --seed 43 --nv 1 --device cuda:0
+
+主模型 seed 44：
+
+    bash scripts/run_mecge_table1_repro.sh --model main --seed 44 --nv 1 --device cuda:0
+
+EDDM 1-shot seed 42：
+
+    bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 42 --nv 1 --device cuda:0
+
+若要跑 nv2：
+
+    bash scripts/run_mecge_table1_repro.sh --nv 2 --device cuda:0
+
+若 pkl 放在其他位置：
+
+    bash scripts/run_mecge_table1_repro.sh --pkl-file /path/to/dataset_bw_nv1.pkl --device cuda:0
+
+只做訓練與 QTDB pkl test，不跑 robustness：
+
+    bash scripts/run_mecge_table1_repro.sh --nv 1 --skip-robustness
+
+只用既有 checkpoint 跑 robustness 與彙整：
+
+    bash scripts/run_mecge_table1_repro.sh --nv 1 --skip-train
+
+完成後會產生彙整檔：
+
+    runs/mecge_table1_repro/analysis/table1_comparison__qtdb_train_qtdb_test__nv1.csv
+    runs/mecge_table1_repro/analysis/robustness_comparison__qtdb__nv1.csv

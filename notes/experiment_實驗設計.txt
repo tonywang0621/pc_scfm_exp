@@ -366,15 +366,15 @@ Early stopping 與模型選擇原則：
 - Optimizer、learning rate、scheduler、batch size、weight decay 與模型 loss 仍優先依各模型原論文或官方實作設定；只有在原設定於本 benchmark 明顯不足或論文未指定時，才作必要調整並註明。
 - 為避免某模型因無限制訓練取得不公平優勢，需事先固定上述 stopping policy，並在報告中列出 wall-clock time、epoch/iteration 數與 best checkpoint 出現位置。
 - 每個模型至少應在固定 validation interval 下同步記錄同一套 validation metrics，方便檢查是否 overfit 或過早停止。
-- 主要模型選擇指標使用 validation PRD mean，因為 PRD 是 MECG-E 主表使用的核心 reference-based distortion metric，且 lower is better。
+- 主要模型選擇指標使用 validation loss，也就是各模型原本 loss function 在 validation set 上算出的結果。
 - Validation PRD 需改善至少 1.0e-4 才視為有效改善並重置 patience，避免浮點誤差或極小波動延後 early stopping。
 - Validation 階段同步記錄 validation loss、PCC、PRD、SNR improvement、low-frequency power reduction、R-peak timing error 與 RR interval MAE，作為 sanity check 與訓練曲線分析；這些指標不直接作為跨模型 training loss 比較。
-- 主要回報 checkpoint 採用 best validation PRD checkpoint。
-- 同時保存 best validation loss checkpoint 與 best validation PCC checkpoint 作為輔助分析，但正式主結果以 best validation PRD checkpoint 為準。
-- 若 validation PRD 無改善但 validation loss 或 PCC 改善，可保存對應輔助 checkpoint，但不重置 patience，也不改變主要模型選擇標準。
+- 主要回報 checkpoint 採用 best validation loss checkpoint。
+- 同時保存 best validation PCC checkpoint 與 best validation PRD checkpoint 作為輔助分析，但正式主結果以 best validation loss checkpoint 為準。
+- 若 validation loss 無改善但 PCC 或 PRD 改善，可保存對應輔助 checkpoint，但不重置 patience，也不改變主要模型選擇標準。
 - Validation loss 因各模型 loss 組成不同，不可作為跨模型效能比較指標；尤其 PC-SCFM 含有 flow、behavior cloning、value 與 risk 等 auxiliary losses。
-- 訓練結束後可輸出 best validation loss / PCC checkpoint 的測試結果作為診斷，但正式表格、統計分析與 robustness summary 必須預設使用 best validation PRD checkpoint。
-- 正式 ablation summary 預設只彙整 best validation PRD checkpoint；best validation loss / PCC checkpoint 僅在輔助分析時另行納入。
+- 訓練結束後可輸出 best validation PCC / PRD checkpoint 的測試結果作為診斷，但正式表格、統計分析與 robustness summary 必須預設使用 best validation loss checkpoint。
+- 正式 ablation summary 預設只彙整 best validation loss checkpoint；best validation PCC / PRD checkpoint 僅在輔助分析時另行納入。
 - PTB-XL train / validation / test NPZ 必須包含 fold metadata，loader 需強制檢查 folds 1-8 / 9 / 10 是否符合設定。
 
 Baseline recipe 對齊現況（2026-08 已逐一對照論文 / 官方原始碼修正，細節見各 config
@@ -387,7 +387,7 @@ Baseline recipe 對齊現況（2026-08 已逐一對照論文 / 官方原始碼�
 - 訓練 recipe 採「paper optimizer + unified convergence control」：optimizer、learning
   rate、scheduler、batch size、weight decay、loss 優先對齊原論文或官方碼；主要比較的
   max epoch 統一為 50000，early stopping patience 統一為 20，min_delta 統一為 1.0e-4，
-  model selection 統一使用 validation PRD mean。DeScoD 仍保留 Adam 1e-3 /
+  model selection 統一使用 validation loss。DeScoD 仍保留 Adam 1e-3 /
   StepLR(150,0.1) / batch 96；EDDM 保留 RAdam 1e-5 / batch 64 + ReduceLROnPlateau；
   MECG-E 保留 AdamW betas[0.8,0.99] wd 1e-2 / lr 1e-4 / ExponentialLR 0.99 / batch 96；
   proposed MambAttention CFM U-Net BD 保留其收斂用 ReduceLROnPlateau recipe。
@@ -527,8 +527,8 @@ Baseline recipe 對齊現況（2026-08 已逐一對照論文 / 官方原始碼�
 9. 主要指標使用 PRD、SNR improvement、low-frequency power reduction、R-peak/RR interval error。
 10. 輔助指標使用 RMSE、centered cosine similarity、QRS amplitude error、視覺比較與頻譜分析。
 11. Reference-based metrics 只用於有 clean reference 的 synthetic evaluation；real-world no-reference test 使用 PSD/spectrogram、低頻能量變化、R-peak detection 穩定度與視覺檢查。
-12. Baseline training recipe 採 paper-faithful optimizer / LR / scheduler 原則，但主要比較統一使用 convergence-controlled stopping：max epoch 50000、patience 20、min_delta 1.0e-4、validation PRD 選模。
-13. 所有模型使用同一 validation fold 做 tuning 與 checkpoint selection，並完整報告 recipe manifest、實際停止 epoch、best PRD checkpoint 出現位置與任何 implementation deviation。
+12. Baseline training recipe 採 paper-faithful optimizer / LR / scheduler 原則，但主要比較統一使用 convergence-controlled stopping：max epoch 50000、patience 20、min_delta 1.0e-4、validation loss 選模。
+13. 所有模型使用同一 validation fold 做 tuning 與 checkpoint selection，並完整報告 recipe manifest、實際停止 epoch、best validation loss checkpoint 出現位置與任何 implementation deviation。
 14. 加入 ablation study 與 complexity analysis。
 15. 若時間允許，加入 real-world no-reference test。
 
@@ -579,11 +579,11 @@ Baseline recipe 對齊現況（2026-08 已逐一對照論文 / 官方原始碼�
   eddm、fir、iir 的架構/loss/optimizer/lr/betas/weight_decay/scheduler 已逐一對照各自論文
   或官方原始碼修正（見上「Baseline recipe 對齊現況」與 EXPECTED_TRAINING_BY_MODEL）。
   train_supervised.py 支援 Adam/AdamW/RAdam、none/StepLR/ExponentialLR/ReduceLROnPlateau、
-  per-config grad_clip_norm、val_pcc / val_loss / val_prd 三種選模，且同時保存
+  per-config grad_clip_norm、val_loss / val_pcc / val_prd 三種選模，且同時保存
   best_pcc_model.pt、best_prd_model.pt 與 best_model.pt。
   目前主要比較採統一 convergence-controlled stopping：train_epochs 50000、
   early_stopping_patience_epochs 20、early_stopping_min_delta 1.0e-4、selection_metric
-  val_prd；optimizer、learning rate、scheduler、batch size 和 loss 仍依各模型論文或官方碼。
+  val_loss；optimizer、learning rate、scheduler、batch size 和 loss 仍依各模型論文或官方碼。
 
 5. Inference
 - 程式：code/inference.py。

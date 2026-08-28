@@ -1,11 +1,11 @@
-data_dir: "../data/ecg_baseline_wander"
-root_dir: "../runs/ecg_baseline_wander"
+data_dir: "../data/mecge_table1_repro"
+root_dir: "../runs/mecge_table1_repro/mambattention_stfrft_dualpath_dapp_cfm_unet_bd"
 
 checkpoint_dir: "${root_dir}/checkpoint"
 results_dir: "${root_dir}/results"
 log_dir: "${root_dir}/log"
 
-exp_name: ptbxl_lead2_baseline_wander_mambattention_stfrft_dualpath_dapp_cfm_unet_bd
+exp_name: mambattention_stfrft_dualpath_dapp_cfm_unet_bd__qtdb_train_qtdb_test__nv1__seed42
 model_name: mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg
 seed: 42
 log_tensorboard: True
@@ -13,18 +13,6 @@ log_config: False
 log_model_architecture: False
 
 training:
-  # Proposed method -- recipe tuned for full convergence (notes/experiment_
-  # 實驗設計.txt allows the proposed model its own recipe, as long as the
-  # validation fold and selection rule stay the same as the baselines: this
-  # uses only PTB-XL fold 9, selection_metric val_loss, best checkpoint saved
-  # throughout).
-  # ExponentialLR(0.99) would crush the LR to ~1e-6 by epoch ~400, which
-  # undertrains a model with a CFM flow-matching head + auxiliary U-Net + a
-  # 9-term loss. ReduceLROnPlateau instead anneals only when validation
-  # stalls, so training runs until it genuinely stops improving; the very
-  # patient EarlyStopping (patience 20, min_delta 1e-4 on val PRD) ensures
-  # it never stops short of the optimum. train_epochs is an effectively
-  # unlimited cap.
   train_epochs: 50000
   batch_size: 96
   lr: 1.0e-4
@@ -53,49 +41,30 @@ evaluation:
 dataset:
   name: ecg_baseline_wander
   data_dir: "${data_dir}"
-  # Preprocessing is IDENTICAL to the 8 baseline configs (deepfilter, drnn,
-  # fcn_dae, descod_ecg_1shot, eddm, mecg_e, fir_filter, iir_filter) so this
-  # model's SSD / MAD / PRD / CosSim are directly comparable with them:
-  # 360 Hz resample, 512-sample non-overlapping windows, endpoint-centering,
-  # Butterworth-4 zero-phase 0.05-40 Hz clean reference, NSTDB baseline
-  # wander scaled by an integer-percent peak-to-peak ratio in [0.2, 2.0]
-  # (DeepFilter's Data_Preparation: randint(20, 200) / 100).
-  train_dataset: ptbxl
-  external_test_datasets:
-    - mit_bih
-    - chapman
-    - cpsc
-    - qtdb
-  lead: II
+  pkl_file: "${data_dir}/raw/dataset_bw_nv1.pkl"
+  pkl_validation_ratio: 0.3
+  pkl_validation_random_state: 1
+  train_dataset: qtdb
+  external_test_datasets: []
+  test_label: qtdb_pkl_test
+  lead: single
   split:
-    strategy: ptbxl_official_folds
-    patient_wise: True
-    train_folds: [1, 2, 3, 4, 5, 6, 7, 8]
-    validation_fold: 9
-    test_fold: 10
-    ratio: [0.8, 0.1, 0.1]
-  clean_reference:
-    filter_type: butterworth
-    filter_order: 4
-    zero_phase: True
-    bandpass_hz: [0.05, 40.0]
+    strategy: mecge_official_pkl
+    patient_wise: false
+    ratio: [0.7, 0.3, 0.0]
   resample_hz: 360
   window_size: 512
   overlap_ratio: 0.0
-  normalization: endpoint_center
+  normalization: mecge_official_pkl
   baseline_wander:
-    train_source: nstdb
+    train_source: mecge_official_pkl
     alpha_mode: peak_to_peak_ratio
     noise_sampling: deepfilter
     alpha_sampling: integer_percent_uniform
     alpha_values: [0.2, 2.0]
     robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
-    controlled_frequencies_hz: [0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0]
     test_types:
       - nstdb
-      - sinusoidal
-      - multi_sine
-      - random_low_frequency_drift
   eps: 1.0e-10
 
 model:

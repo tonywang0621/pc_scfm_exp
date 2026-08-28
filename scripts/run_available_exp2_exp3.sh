@@ -154,7 +154,7 @@ import yaml
 
 with open(sys.argv[1], encoding="utf-8") as f:
     cfg = yaml.safe_load(f) or {}
-print(str((cfg.get("training") or {}).get("selection_metric", "val_pcc")).lower())
+print(str((cfg.get("training") or {}).get("selection_metric", "val_loss")).lower())
 PY
   )"
   if [[ "$selection_metric" == "val_loss" ]]; then

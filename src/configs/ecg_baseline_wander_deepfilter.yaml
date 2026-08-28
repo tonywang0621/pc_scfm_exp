@@ -22,7 +22,7 @@ training:
   # batch_size=128 -- batch_size=32 there only appears in test_dl() for
   # inference batching. We follow the training code (128).
   # Unified convergence-controlled benchmark: train_epochs is a large cap and
-  # early stopping / checkpoint selection use validation PRD while optimizer,
+  # early stopping / checkpoint selection use each model's validation loss while optimizer,
   # LR, batch size, and ReduceLROnPlateau remain aligned with official code.
   train_epochs: 50000
   batch_size: 128
@@ -41,7 +41,7 @@ training:
   save_every_epochs: 50
   early_stopping_patience_epochs: 20
   early_stopping_min_delta: 1.0e-4
-  selection_metric: val_prd
+  selection_metric: val_loss
   progress_bar: True
   resume: False
   resume_checkpoint: null

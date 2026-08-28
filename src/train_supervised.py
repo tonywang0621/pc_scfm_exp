@@ -18,6 +18,8 @@ import yaml
 import time 
 import shutil 
 import argparse
+import csv
+import json
 from tqdm.auto import tqdm
 
 from models import get_model 
@@ -150,6 +152,38 @@ def _save_training_state(
     )
 
 
+def _write_loss_history(path_prefix, train_losses, val_losses, val_pccs, eval_every):
+    def clean_value(values, idx):
+        if idx >= len(values):
+            return None
+        value = float(values[idx])
+        return None if np.isnan(value) else value
+
+    rows = []
+    total_rows = max(len(train_losses), len(val_losses), len(val_pccs))
+    for idx in range(total_rows):
+        row = {
+            "index": idx + 1,
+            "train_step": idx + 1,
+            "validation_step": (idx + 1) * eval_every,
+            "train_loss": clean_value(train_losses, idx),
+            "val_loss": clean_value(val_losses, idx),
+            "val_pcc": clean_value(val_pccs, idx),
+        }
+        rows.append(row)
+
+    csv_path = Path(f"{path_prefix}.csv")
+    json_path = Path(f"{path_prefix}.json")
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["index", "train_step", "validation_step", "train_loss", "val_loss", "val_pcc"])
+        writer.writeheader()
+        writer.writerows(rows)
+    with open(json_path, "w", encoding="utf-8") as handle:
+        json.dump(rows, handle, indent=2)
+    return csv_path, json_path
+
+
 def train():     
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--config", default="configs/ecg_baseline_wander_mecg_e.yaml")
@@ -240,7 +274,8 @@ def train():
         writer = SummaryWriter(log_dir=tb_dir)
         logger.info(f"TensorBoard logging enabled. Logs will be saved to {tb_dir}")
         
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    requested_device = args.get("device", None)
+    device = torch.device(requested_device if requested_device else ('cuda:0' if torch.cuda.is_available() else 'cpu'))
     logger.info(f'Using device {device}')
     # print(f'Using device {device}')
     
@@ -365,7 +400,7 @@ def train():
     training_state_ckpt = checkpoint_dir / 'training_state.pt'
     skip_training = not bool(getattr(model, "requires_training", True))
 
-    selection_metric = str(args.training.get("selection_metric", "val_pcc")).lower()
+    selection_metric = str(args.training.get("selection_metric", "val_loss")).lower()
     if selection_metric not in {"val_pcc", "val_loss", "val_prd"}:
         raise ValueError("training.selection_metric must be 'val_pcc', 'val_loss', or 'val_prd'.")
     patience = args.training.get(
@@ -479,6 +514,7 @@ def train():
                         last_metrics_step is None
                         or current_step - last_metrics_step >= validation_metrics_every_steps
                     )
+                    loss_due = metrics_due or selection_metric == "val_loss"
                     avg_val_loss = None
                     val_noisy_batches, val_clean_batches, val_pred_batches = [], [], []
 
@@ -500,11 +536,12 @@ def train():
 
                     avg_val_pcc = torch.cat([batch.flatten() for batch in val_pcc_batches]).mean().item()
                     val_metrics = None
-                    if metrics_due:
+                    if loss_due:
                         avg_val_loss = 0
                         for val_batch in val_loader:
                             avg_val_loss += model.compute_loss(val_batch, device).item()
                         avg_val_loss /= len(val_loader)
+                    if metrics_due:
                         fs = args.dataset.get("resample_hz", args.model.get("sampling_rate", 250))
                         low_freq_hz = args.get("evaluation", {}).get("low_frequency_high_hz", 0.5)
                         val_metrics = reconstruction_metrics_from_arrays(
@@ -741,10 +778,19 @@ def train():
             eval_every_epochs, eval_dir, val_pccs=val_pccs, x_axis_label="Training epoch",
         )
         logger.info(f"Saved loss curves to {loss_curve_path}")
+        history_csv, history_json = _write_loss_history(
+            eval_dir / "training_history",
+            train_losses,
+            val_losses,
+            val_pccs,
+            eval_every_epochs,
+        )
+        logger.info(f"Saved training history to {history_csv} and {history_json}")
 
         fs = args.dataset.get("resample_hz", args.model.get("sampling_rate", 250))
         low_freq_hz = args.get("evaluation", {}).get("low_frequency_high_hz", 0.5)
-        eval_items = [("ptbxl_fold10_test", test_dataset, test_loader)]
+        test_label = str(args.dataset.get("test_label", "ptbxl_fold10_test"))
+        eval_items = [(test_label, test_dataset, test_loader)]
         for external_name in args.dataset.get("external_test_datasets", []):
             try:
                 external_dataset = get_dataset(data_mode=external_name, **dataset_kwargs)

@@ -18,8 +18,8 @@ training:
   # iteration budget (only generic T/M in Algorithm 1) and says the LR "can
   # adaptively adjust" -- RAdam's warmup. A ReduceLROnPlateau schedule is
   # added on top so the fixed-LR diffusion training anneals to a tight
-  # minimum; EarlyStopping uses validation PRD for the unified benchmark,
-  # and the best-val-PRD checkpoint is saved throughout.
+  # minimum; EarlyStopping uses each model's validation loss for the unified
+  # benchmark, and the best-val-loss checkpoint is saved throughout.
   train_epochs: 50000
   batch_size: 64
   lr: 1.0e-5
@@ -36,7 +36,7 @@ training:
   save_every_epochs: 50
   early_stopping_patience_epochs: 20
   early_stopping_min_delta: 1.0e-4
-  selection_metric: val_prd
+  selection_metric: val_loss
   progress_bar: True
   resume: False
   resume_checkpoint: null

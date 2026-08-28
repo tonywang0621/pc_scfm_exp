@@ -85,6 +85,39 @@ def plot_loss_curves(train_losses, val_losses, eval_every, results_dir, val_pccs
     save_curve(train_losses, np.arange(1, len(train_losses) + 1), "Train Loss", "train_loss.png", "loss")
     val_steps = np.arange(1, len(val_losses) + 1) * eval_every
     save_curve(val_losses, val_steps, "Val Loss", "val_loss.png", "loss")
+    if train_losses and val_losses:
+        train_values = np.asarray(train_losses, dtype=np.float64)
+        val_values = np.asarray(val_losses, dtype=np.float64)
+        train_steps = np.arange(1, len(train_values) + 1)
+        val_steps = np.arange(1, len(val_values) + 1) * eval_every
+        train_valid = ~np.isnan(train_values)
+        val_valid = ~np.isnan(val_values)
+        if np.any(train_valid) and np.any(val_valid):
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot(
+                train_steps[train_valid],
+                train_values[train_valid],
+                label="Train Loss",
+                linewidth=2,
+                marker="o",
+                markersize=3,
+            )
+            ax.plot(
+                val_steps[val_valid],
+                val_values[val_valid],
+                label="Val Loss",
+                linewidth=2,
+                marker="o",
+                markersize=3,
+            )
+            ax.set_xlabel(x_axis_label)
+            ax.set_ylabel("loss")
+            ax.set_title("Train and Val Loss")
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            fig.tight_layout()
+            fig.savefig(loss_curves_dir / "train_val_loss.png", dpi=200)
+            plt.close(fig)
     if val_pccs:
         val_pcc_steps = np.arange(1, len(val_pccs) + 1) * eval_every
         save_curve(val_pccs, val_pcc_steps, "Val PCC", "val_pcc.png", "PCC")

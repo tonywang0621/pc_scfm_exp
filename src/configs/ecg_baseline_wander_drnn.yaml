@@ -27,7 +27,7 @@ training:
   # oscillating around the optimum; ReduceLROnPlateau (the schedule the
   # DeepFilter DRNN reproduction also uses) is added so it anneals to a tight
   # minimum. Unified convergence-controlled benchmark selection uses
-  # validation PRD with the shared patience/min_delta policy.
+  # validation loss with the shared patience/min_delta policy.
   train_epochs: 50000
   batch_size: 64
   lr: 1.0e-3
@@ -45,7 +45,7 @@ training:
   save_every_epochs: 50
   early_stopping_patience_epochs: 20
   early_stopping_min_delta: 1.0e-4
-  selection_metric: val_prd
+  selection_metric: val_loss
   progress_bar: True
   resume: False
   resume_checkpoint: null

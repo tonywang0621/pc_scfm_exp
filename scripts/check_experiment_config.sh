@@ -37,6 +37,7 @@ EXPECTED = {
     ("training", "save_every_epochs"): 5,
     ("training", "early_stopping_patience_epochs"): 20,
     ("training", "early_stopping_min_delta"): 1.0e-4,
+    ("training", "selection_metric"): "val_loss",
     ("training", "resume"): False,
     ("training", "resume_checkpoint"): None,
     ("evaluation", "low_frequency_high_hz"): 0.5,
@@ -451,20 +452,20 @@ EXPECTED_TRAINING_BY_MODEL = {
         # AdamW's own default (which the official code relies on). grad_clip
         # null: official code has clipping commented out. For the unified
         # convergence-controlled benchmark, the epoch budget is a large cap and
-        # checkpoint selection uses validation PRD.
+        # checkpoint selection uses each model's validation loss.
         ("training", "train_epochs"): 50000,
         ("training", "weight_decay"): 1.0e-2,
         ("training", "grad_clip_norm"): None,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
     },
     "eddm": {
         # EDDM (Li et al. 2025, Section IV-C2): RAdam, lr=1e-5, batch=64. The
         # paper's LR "adaptively adjusts" (RAdam warmup) and gives no epoch
         # budget; a ReduceLROnPlateau schedule + patient EarlyStopping are
         # added so it anneals to convergence. The unified benchmark selects
-        # checkpoints by validation PRD.
+        # checkpoints by validation loss.
         ("training", "batch_size"): 64,
         ("training", "lr"): 1.0e-5,
         ("training", "optimizer"): "RAdam",
@@ -476,14 +477,14 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "lr_scheduler_patience_epochs"): 5,
         ("training", "min_lr"): 1.0e-7,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "save_every_epochs"): 50,
     },
     "deepfilter": {
         # DeepFilter (Romero et al. 2021 / official dl_pipeline.py): Adam,
         # lr=1e-3, batch=128, ReduceLROnPlateau(factor=0.5, patience=2,
         # min_lr=1e-10). The unified convergence-controlled benchmark uses
-        # validation PRD selection with shared stopping policy.
+        # validation loss selection with shared stopping policy.
         ("training", "train_epochs"): 50000,
         ("training", "batch_size"): 128,
         ("training", "lr"): 1.0e-3,
@@ -498,7 +499,7 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "min_lr"): 1.0e-10,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "save_every_epochs"): 50,
         ("training", "grad_clip_norm"): None,
     },
@@ -521,7 +522,7 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "min_lr"): 1.0e-8,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "save_every_epochs"): 50,
         ("training", "grad_clip_norm"): None,
         ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
@@ -532,7 +533,7 @@ EXPECTED_TRAINING_BY_MODEL = {
         # DeepFilter reproduction's released code (dl_pipeline.py, applied to
         # every DL baseline): batch 128, lr 1e-3, ReduceLROnPlateau(factor
         # 0.5, patience 2, min_lr 1e-10). The unified convergence-controlled
-        # benchmark uses validation PRD selection with shared stopping policy.
+        # benchmark uses validation loss selection with shared stopping policy.
         ("training", "train_epochs"): 50000,
         ("training", "batch_size"): 128,
         ("training", "lr"): 1.0e-3,
@@ -546,7 +547,7 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "min_lr"): 1.0e-10,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "save_every_epochs"): 50,
         ("training", "grad_clip_norm"): None,
         ("dataset", "external_test_datasets"): ["mit_bih", "cpsc", "chapman", "qtdb"],
@@ -555,11 +556,11 @@ EXPECTED_TRAINING_BY_MODEL = {
         # DeScoD-ECG (Li et al. 2023, Section IV-C / official utils.py): Adam,
         # lr=1e-3, StepLR(step_size=150, gamma=0.1). For the unified
         # convergence-controlled benchmark, the epoch budget is a large cap
-        # and checkpoint selection uses validation PRD.
+        # and checkpoint selection uses validation loss.
         ("training", "train_epochs"): 50000,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "lr"): 1.0e-3,
         ("training", "optimizer"): "Adam",
         ("training", "betas"): [0.9, 0.999],
@@ -573,7 +574,7 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "train_epochs"): 50000,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "lr"): 1.0e-3,
         ("training", "optimizer"): "Adam",
         ("training", "betas"): [0.9, 0.999],
@@ -587,7 +588,7 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "train_epochs"): 50000,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "lr"): 1.0e-3,
         ("training", "optimizer"): "Adam",
         ("training", "betas"): [0.9, 0.999],
@@ -610,7 +611,7 @@ EXPECTED_TRAINING_BY_MODEL = {
         ("training", "min_lr"): 1.0e-7,
         ("training", "early_stopping_patience_epochs"): 20,
         ("training", "early_stopping_min_delta"): 1.0e-4,
-        ("training", "selection_metric"): "val_prd",
+        ("training", "selection_metric"): "val_loss",
         ("training", "grad_clip_norm"): 1.0,
     },
 }

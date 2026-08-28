@@ -641,7 +641,7 @@ training:
   early_stopping_min_delta: 1.0e-4
 ```
 
-Early stopping 只由 validation PCC 控制；每 1 epoch 用 PTB-XL fold 9 計算 validation PCC。Validation loss 只保存輔助 `best_model.pt`，不重置 patience。訓練時每 1 epoch 會在 `checkpoint/<exp_name>/<model_name>/validation_metrics.yaml` 記錄 validation loss、PRD、SNR improvement、low-frequency reduction、R-peak timing error 與 RR interval MAE 作為 sanity check。
+Early stopping 由 validation loss 控制；每 1 epoch 用 PTB-XL fold 9 計算各模型原本 loss function 在 validation set 上的結果。訓練時每 1 epoch 會在 `checkpoint/<exp_name>/<model_name>/validation_metrics.yaml` 記錄 validation loss、PRD、SNR improvement、low-frequency reduction、R-peak timing error 與 RR interval MAE 作為 sanity check。
 
 命令列範例：
 

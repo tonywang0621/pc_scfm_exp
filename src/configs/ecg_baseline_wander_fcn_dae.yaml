@@ -27,7 +27,7 @@ training:
   # FCN-DAE with ssd_loss, but the ORIGINAL paper uses MSE, which is what
   # this baseline follows -- see model.loss_fn.)
   # Unified convergence-controlled benchmark: train_epochs is a large cap and
-  # early stopping / checkpoint selection use validation PRD while optimizer,
+  # early stopping / checkpoint selection use each model's validation loss while optimizer,
   # LR, batch size, and ReduceLROnPlateau remain aligned with the reproduction
   # recipe.
   train_epochs: 50000
@@ -47,7 +47,7 @@ training:
   save_every_epochs: 50
   early_stopping_patience_epochs: 20
   early_stopping_min_delta: 1.0e-4
-  selection_metric: val_prd
+  selection_metric: val_loss
   progress_bar: True
   resume: False
   resume_checkpoint: null
