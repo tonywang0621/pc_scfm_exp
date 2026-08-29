@@ -35,7 +35,7 @@ Options:
   --nstdb-raw PATH       Raw NSTDB WFDB directory for 100% DeepFilter/MECG-E prep.
   --prepare-raw          Recreate dataset_bw_nv*.pkl from raw QTDB/NSTDB before training.
   --device DEVICE       Training/inference device. Default: cuda:0
-  --model NAME          One of: all, mecge, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
+  --model NAME          One of: all, mecge, mambattention, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
   --seed N              Run one seed only. Required for a single model/seed job.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
   --skip-robustness     Only run train + QTDB pkl test.
@@ -53,6 +53,7 @@ Environment overrides:
 Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model mecge --seed 42 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mambattention --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stable --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 42 --nv 1 --device cuda:0
@@ -143,10 +144,13 @@ normalize_model() {
     mecge|mecg_e)
       printf '%s\n' "mecge"
       ;;
+    mambattention|mambattention_ecg)
+      printf '%s\n' "mambattention"
+      ;;
     stfrft|mambattention_stfrft|mambattention_stfrft_ecg)
       printf '%s\n' "stfrft"
       ;;
-    main|mambattention|mambattention_stfrft_dualpath_dapp_cfm_unet_bd)
+    main|mambattention_stfrft_dualpath_dapp_cfm_unet_bd)
       printf '%s\n' "main"
       ;;
     stable|mambattention_stfrft_dualpath_dapp_stable_cfm_unet)
@@ -162,7 +166,7 @@ normalize_model() {
       printf '%s\n' "eddm_1shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, mecge, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
+      echo "Unsupported --model '$1'. Expected one of: all, mecge, mambattention, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
       exit 2
       ;;
   esac
@@ -305,6 +309,9 @@ MAIN_MODEL_NAME="mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg"
 MECGE_CONFIG="configs/mecge_table1_repro_mecg_e.yaml"
 MECGE_RESULT_MODEL="mecg_e"
 MECGE_MODEL_NAME="mecg_e"
+MAMBATTENTION_CONFIG="configs/mecge_table1_repro_mambattention.yaml"
+MAMBATTENTION_RESULT_MODEL="mambattention"
+MAMBATTENTION_MODEL_NAME="mambattention_ecg"
 STFRFT_CONFIG="configs/mecge_table1_repro_mambattention_stfrft.yaml"
 STFRFT_RESULT_MODEL="mambattention_stfrft"
 STFRFT_MODEL_NAME="mambattention_stfrft_ecg"
@@ -324,10 +331,11 @@ EDDM_MODEL_NAME="eddm"
 case "$TARGET_MODEL" in
   all)
     if [[ -n "$TARGET_SEED" ]]; then
-      echo "--seed can only be used with --model mecge, stfrft, main, stable, eddm_fm, eddm_fm_mamba, or eddm_1shot." >&2
+      echo "--seed can only be used with --model mecge, mambattention, stfrft, main, stable, eddm_fm, eddm_fm_mamba, or eddm_1shot." >&2
       exit 2
     fi
     run_model_family "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "$SEEDS_MAIN"
+    run_model_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN"
     run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN"
     run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN"
     run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN"
@@ -348,6 +356,13 @@ case "$TARGET_MODEL" in
       exit 2
     fi
     run_one_job "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "$TARGET_SEED"
+    ;;
+  mambattention)
+    if [[ -z "$TARGET_SEED" ]]; then
+      echo "--model mambattention requires --seed N for a single model/seed job." >&2
+      exit 2
+    fi
+    run_one_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$TARGET_SEED"
     ;;
   stfrft)
     if [[ -z "$TARGET_SEED" ]]; then
