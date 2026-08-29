@@ -172,6 +172,7 @@ class EDDMNoiseUNet1d(nn.Module):
     def __init__(
         self,
         in_channels=2,
+        out_channels=1,
         base_channels=64,
         channel_mults=(1, 2, 4, 8),
         time_dim=256,
@@ -217,7 +218,7 @@ class EDDMNoiseUNet1d(nn.Module):
         self.output = nn.Sequential(
             nn.GroupNorm(1, channels[0]),
             nn.SiLU(),
-            nn.Conv1d(channels[0], 1, 3, padding=1),
+            nn.Conv1d(channels[0], int(out_channels), 3, padding=1),
         )
 
     def forward(self, x, coefficients):
@@ -465,12 +466,16 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         gaussian_inference_weight=0.10,
         recon_weight=0.25,
         lowfreq_weight=0.10,
+        baseline_smooth_weight=0.05,
         lowfreq_kernel_size=129,
         no_gaussian_weight=0.50,
         endpoint_weight=0.50,
         inference_lowpass_ecg=True,
         inference_highfreq_weight=0.10,
         sampler="heun",
+        shared_backbone=False,
+        final_endpoint_blend=0.25,
+        final_lowpass_baseline=True,
         velocity_clip=8.0,
         state_clip=8.0,
         output_blend=1.0,
@@ -486,34 +491,55 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         self.gaussian_inference_weight = float(gaussian_inference_weight)
         self.recon_weight = float(recon_weight)
         self.lowfreq_weight = float(lowfreq_weight)
+        self.baseline_smooth_weight = float(baseline_smooth_weight)
         self.lowfreq_kernel_size = int(lowfreq_kernel_size)
         self.no_gaussian_weight = float(no_gaussian_weight)
         self.endpoint_weight = float(endpoint_weight)
         self.inference_lowpass_ecg = bool(inference_lowpass_ecg)
         self.inference_highfreq_weight = float(inference_highfreq_weight)
         self.sampler = str(sampler).lower()
+        self.shared_backbone = bool(shared_backbone)
+        self.final_endpoint_blend = float(final_endpoint_blend)
+        self.final_lowpass_baseline = bool(final_lowpass_baseline)
         self.velocity_clip = float(velocity_clip)
         self.state_clip = float(state_clip)
         self.output_blend = float(output_blend)
         self.gaussian_scale = float(gaussian_scale)
-        self.ecg_velocity_model = EDDMNoiseUNet1d(
-            in_channels=2,
-            base_channels=int(base_channels),
-            channel_mults=tuple(channel_mults),
-            time_dim=int(time_dim),
-            dropout=float(dropout),
-            pool_scales=tuple(pool_scales),
-            attention_heads=int(attention_heads),
-        )
-        self.gaussian_velocity_model = EDDMNoiseUNet1d(
-            in_channels=2,
-            base_channels=int(base_channels),
-            channel_mults=tuple(channel_mults),
-            time_dim=int(time_dim),
-            dropout=float(dropout),
-            pool_scales=tuple(pool_scales),
-            attention_heads=int(attention_heads),
-        )
+        if self.shared_backbone:
+            self.dual_velocity_model = EDDMNoiseUNet1d(
+                in_channels=2,
+                out_channels=2,
+                base_channels=int(base_channels),
+                channel_mults=tuple(channel_mults),
+                time_dim=int(time_dim),
+                dropout=float(dropout),
+                pool_scales=tuple(pool_scales),
+                attention_heads=int(attention_heads),
+            )
+            self.ecg_velocity_model = None
+            self.gaussian_velocity_model = None
+        else:
+            self.dual_velocity_model = None
+            self.ecg_velocity_model = EDDMNoiseUNet1d(
+                in_channels=2,
+                out_channels=1,
+                base_channels=int(base_channels),
+                channel_mults=tuple(channel_mults),
+                time_dim=int(time_dim),
+                dropout=float(dropout),
+                pool_scales=tuple(pool_scales),
+                attention_heads=int(attention_heads),
+            )
+            self.gaussian_velocity_model = EDDMNoiseUNet1d(
+                in_channels=2,
+                out_channels=1,
+                base_channels=int(base_channels),
+                channel_mults=tuple(channel_mults),
+                time_dim=int(time_dim),
+                dropout=float(dropout),
+                pool_scales=tuple(pool_scales),
+                attention_heads=int(attention_heads),
+            )
 
         step_index = torch.arange(1, self.timesteps + 1, dtype=torch.float64)
         linear_decrease = self.timesteps - step_index + 1.0
@@ -575,8 +601,13 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         xt = self._clip_by_robust_scale(torch.nan_to_num(xt), self.state_clip)
         model_input = torch.cat([xt, noisy], dim=1)
         coefficients = self._coefficients(t)
-        ecg_velocity = self.ecg_velocity_model(model_input, coefficients)
-        gaussian_velocity = self.gaussian_velocity_model(model_input, coefficients)
+        if self.shared_backbone:
+            dual_velocity = self.dual_velocity_model(model_input, coefficients)
+            ecg_velocity = dual_velocity[:, 0:1]
+            gaussian_velocity = dual_velocity[:, 1:2]
+        else:
+            ecg_velocity = self.ecg_velocity_model(model_input, coefficients)
+            gaussian_velocity = self.gaussian_velocity_model(model_input, coefficients)
         return (
             self._clip_by_robust_scale(torch.nan_to_num(ecg_velocity), self.velocity_clip),
             self._clip_by_robust_scale(torch.nan_to_num(gaussian_velocity), self.velocity_clip),
@@ -612,6 +643,15 @@ class EDDMFlowMatchingDenoiser(nn.Module):
             else:
                 current = current - delta
             current = self._clip_by_robust_scale(torch.nan_to_num(current), self.state_clip)
+        if self.final_endpoint_blend > 0:
+            endpoint_t = torch.full((x.shape[0],), self.timesteps - 1, device=x.device, dtype=torch.long)
+            endpoint_ecg_noise, _ = self._predict_components(noisy, noisy, endpoint_t)
+            endpoint_ecg_noise = self._project_inference_ecg_noise(endpoint_ecg_noise)
+            flow_baseline = noisy - current
+            blended_baseline = flow_baseline + self.final_endpoint_blend * (endpoint_ecg_noise - flow_baseline)
+            if self.final_lowpass_baseline:
+                blended_baseline = self._project_inference_ecg_noise(blended_baseline)
+            current = noisy - blended_baseline
         output = noisy + self.output_blend * (current - noisy)
         return output.squeeze(1) if squeeze else output
 
@@ -654,6 +694,12 @@ class EDDMFlowMatchingDenoiser(nn.Module):
             target_low = self._smooth_1d(ecg_noise, self.lowfreq_kernel_size)
             lowfreq_loss = self._loss_elementwise(predicted_low, target_low)
             loss = loss + self.lowfreq_weight * lowfreq_loss
+
+        if self.baseline_smooth_weight > 0 and predicted_ecg.shape[-1] > 2:
+            predicted_curvature = predicted_ecg[..., 2:] - 2.0 * predicted_ecg[..., 1:-1] + predicted_ecg[..., :-2]
+            target_curvature = ecg_noise[..., 2:] - 2.0 * ecg_noise[..., 1:-1] + ecg_noise[..., :-2]
+            smooth_loss = self._loss_elementwise(predicted_curvature, target_curvature)
+            loss = loss + self.baseline_smooth_weight * F.pad(smooth_loss, (1, 1))
 
         if self.no_gaussian_weight > 0:
             xt_no_gaussian = clean + alpha_bar * ecg_noise

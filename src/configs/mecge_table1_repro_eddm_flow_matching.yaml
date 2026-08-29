@@ -68,7 +68,7 @@ dataset:
   eps: 1.0e-10
 
 model:
-  timesteps: 50
+  timesteps: 25
   num_shots: 1
   base_channels: 64
   channel_mults: [1, 2, 4, 8]
@@ -81,13 +81,17 @@ model:
   gaussian_weight: 0.10
   gaussian_inference_weight: 0.0
   recon_weight: 0.25
-  lowfreq_weight: 0.12
+  lowfreq_weight: 0.16
+  baseline_smooth_weight: 0.04
   lowfreq_kernel_size: 129
-  no_gaussian_weight: 0.60
-  endpoint_weight: 0.70
+  no_gaussian_weight: 0.80
+  endpoint_weight: 1.00
   inference_lowpass_ecg: true
-  inference_highfreq_weight: 0.08
+  inference_highfreq_weight: 0.06
   sampler: heun
+  shared_backbone: true
+  final_endpoint_blend: 0.25
+  final_lowpass_baseline: true
   gaussian_scale: 0.35
   velocity_clip: 8.0
   state_clip: 8.0
