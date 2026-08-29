@@ -14,11 +14,14 @@ NSTDB_RAW="${NSTDB_RAW:-$DATA_ROOT/raw/NSTDB}"
 FORCE_PREPARE_RAW="${FORCE_PREPARE_RAW:-0}"
 SKIP_TRAIN="${SKIP_TRAIN:-0}"
 SKIP_ROBUSTNESS="${SKIP_ROBUSTNESS:-0}"
+RESUME="${RESUME:-0}"
+RESUME_CHECKPOINT="${RESUME_CHECKPOINT:-}"
 SEEDS_MAIN="${SEEDS_MAIN:-42 43 44}"
 SEEDS_EDDM="${SEEDS_EDDM:-42}"
 ALPHAS="${ALPHAS:-0.2 0.6 1.0 1.5 2.0}"
 TARGET_MODEL="${TARGET_MODEL:-all}"
 TARGET_SEED="${TARGET_SEED:-}"
+EXTRA_OVERRIDES=()
 
 usage() {
   cat <<'USAGE'
@@ -32,10 +35,14 @@ Options:
   --nstdb-raw PATH       Raw NSTDB WFDB directory for 100% DeepFilter/MECG-E prep.
   --prepare-raw          Recreate dataset_bw_nv*.pkl from raw QTDB/NSTDB before training.
   --device DEVICE       Training/inference device. Default: cuda:0
-  --model NAME          One of: all, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
+  --model NAME          One of: all, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
   --seed N              Run one seed only. Required for a single model/seed job.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
   --skip-robustness     Only run train + QTDB pkl test.
+  --resume              Resume training from training_state.pt for the selected run.
+  --resume-checkpoint PATH
+                        Resume training from an explicit training_state.pt path.
+  key=value             Extra OmegaConf override passed to train_supervised.py.
 
 Environment overrides:
   SEEDS_MAIN="42 43 44"
@@ -45,10 +52,12 @@ Environment overrides:
 
 Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stable --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm_mamba --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 42 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 42 --nv 1 --resume --device cuda:0
 
 100% DeepFilter/MECG-E raw-prep example:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --prepare-raw --device cuda:0
@@ -98,9 +107,22 @@ while [[ $# -gt 0 ]]; do
       SKIP_ROBUSTNESS=1
       shift
       ;;
+    --resume)
+      RESUME=1
+      shift
+      ;;
+    --resume-checkpoint)
+      RESUME=1
+      RESUME_CHECKPOINT="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
+      ;;
+    *=*)
+      EXTRA_OVERRIDES+=("$1")
+      shift
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -116,6 +138,9 @@ normalize_model() {
   case "$1" in
     all)
       printf '%s\n' "all"
+      ;;
+    stfrft|mambattention_stfrft|mambattention_stfrft_ecg)
+      printf '%s\n' "stfrft"
       ;;
     main|mambattention|mambattention_stfrft_dualpath_dapp_cfm_unet_bd)
       printf '%s\n' "main"
@@ -133,7 +158,7 @@ normalize_model() {
       printf '%s\n' "eddm_1shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
+      echo "Unsupported --model '$1'. Expected one of: all, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
       exit 2
       ;;
   esac
@@ -173,6 +198,11 @@ run_train() {
     return 0
   fi
 
+  local resume_overrides=("training.resume=$RESUME")
+  if [[ -n "$RESUME_CHECKPOINT" ]]; then
+    resume_overrides+=("training.resume_checkpoint=$RESUME_CHECKPOINT")
+  fi
+
   (
     cd "$APP_DIR"
     python3 train_supervised.py \
@@ -187,7 +217,8 @@ run_train() {
       "exp_name=$exp_name" \
       "seed=$seed" \
       "device=$DEVICE" \
-      "training.resume=false"
+      "${resume_overrides[@]}" \
+      "${EXTRA_OVERRIDES[@]}"
   )
 }
 
@@ -267,6 +298,9 @@ prepare_raw_if_needed
 MAIN_CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_cfm_unet_bd.yaml"
 MAIN_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_cfm_unet_bd"
 MAIN_MODEL_NAME="mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg"
+STFRFT_CONFIG="configs/mecge_table1_repro_mambattention_stfrft.yaml"
+STFRFT_RESULT_MODEL="mambattention_stfrft"
+STFRFT_MODEL_NAME="mambattention_stfrft_ecg"
 STABLE_CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_stable_cfm_unet.yaml"
 STABLE_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_stable_cfm_unet"
 STABLE_MODEL_NAME="mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg"
@@ -283,9 +317,10 @@ EDDM_MODEL_NAME="eddm"
 case "$TARGET_MODEL" in
   all)
     if [[ -n "$TARGET_SEED" ]]; then
-      echo "--seed can only be used with --model main, stable, eddm_fm, eddm_fm_mamba, or eddm_1shot." >&2
+      echo "--seed can only be used with --model stfrft, main, stable, eddm_fm, eddm_fm_mamba, or eddm_1shot." >&2
       exit 2
     fi
+    run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN"
     run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN"
     run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN"
     run_model_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN"
@@ -298,6 +333,13 @@ case "$TARGET_MODEL" in
       exit 2
     fi
     run_one_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$TARGET_SEED"
+    ;;
+  stfrft)
+    if [[ -z "$TARGET_SEED" ]]; then
+      echo "--model stfrft requires --seed N for a single model/seed job." >&2
+      exit 2
+    fi
+    run_one_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$TARGET_SEED"
     ;;
   stable)
     if [[ -z "$TARGET_SEED" ]]; then
