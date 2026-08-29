@@ -9,8 +9,8 @@ RUN_ROOT="$ROOT_DIR/runs/mecge_table1_repro"
 NV="${NV:-1}"
 DEVICE="${DEVICE:-cuda:0}"
 PKL_FILE="${PKL_FILE:-$DATA_ROOT/raw/dataset_bw_nv${NV}.pkl}"
-QTDB_RAW="${QTDB_RAW:-}"
-NSTDB_RAW="${NSTDB_RAW:-}"
+QTDB_RAW="${QTDB_RAW:-$DATA_ROOT/raw/QTDB}"
+NSTDB_RAW="${NSTDB_RAW:-$DATA_ROOT/raw/NSTDB}"
 FORCE_PREPARE_RAW="${FORCE_PREPARE_RAW:-0}"
 SKIP_TRAIN="${SKIP_TRAIN:-0}"
 SKIP_ROBUSTNESS="${SKIP_ROBUSTNESS:-0}"
@@ -40,18 +40,15 @@ Options:
 Environment overrides:
   SEEDS_MAIN="42 43 44"
   SEEDS_EDDM="42"
-  QTDB_RAW="/remote/path/to/QTDB"
-  NSTDB_RAW="/remote/path/to/NSTDB"
+  QTDB_RAW="data/mecge_table1_repro/raw/QTDB"
+  NSTDB_RAW="data/mecge_table1_repro/raw/NSTDB"
 
 Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 42 --nv 1 --device cuda:0
 
 100% DeepFilter/MECG-E raw-prep example:
-  bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 \
-    --qtdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/QTDB \
-    --nstdb-raw /home/tony/pc_scfm_exp/data/ecg_baseline_wander/raw/NSTDB \
-    --prepare-raw --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --prepare-raw --device cuda:0
 USAGE
 }
 
