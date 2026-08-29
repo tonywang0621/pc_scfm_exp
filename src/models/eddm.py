@@ -432,3 +432,256 @@ class EDDMDenoiser(nn.Module):
             self.ecg_noise_weight * ecg_loss
             + self.gaussian_noise_weight * gaussian_loss
         )
+
+
+@register_model("eddm_flow_matching")
+class EDDMFlowMatchingDenoiser(nn.Module):
+    """EDDM-style conditional flow matching denoiser.
+
+    This keeps EDDM's two 1-D U-Nets, DAPP first skip, self-attention
+    bottleneck, and conditioning on the current state plus the observed noisy
+    ECG. The stochastic diffusion reverse process is replaced by a
+    deterministic flow sampler over the same dual components:
+
+        x_t = clean + alpha_bar(t) * e + beta_bar(t) * eps
+        e = noisy - clean
+
+    The loss supervises the vector field directly, not PRD/SSD/MAD/CosSim.
+    """
+
+    def __init__(
+        self,
+        timesteps=8,
+        num_shots=1,
+        base_channels=64,
+        channel_mults=(1, 2, 4, 8),
+        time_dim=256,
+        dropout=0.0,
+        pool_scales=(3, 5, 9, 15),
+        attention_heads=4,
+        loss_type="smooth_l1",
+        ecg_weight=1.0,
+        gaussian_weight=0.15,
+        gaussian_inference_weight=0.10,
+        recon_weight=0.25,
+        lowfreq_weight=0.10,
+        lowfreq_kernel_size=129,
+        no_gaussian_weight=0.50,
+        endpoint_weight=0.50,
+        inference_lowpass_ecg=True,
+        inference_highfreq_weight=0.10,
+        sampler="heun",
+        velocity_clip=8.0,
+        state_clip=8.0,
+        output_blend=1.0,
+        gaussian_scale=0.35,
+        **kwargs,
+    ):
+        super().__init__()
+        self.timesteps = max(int(timesteps), 1)
+        self.num_shots = max(int(num_shots), 1)
+        self.loss_type = str(loss_type).lower()
+        self.ecg_weight = float(ecg_weight)
+        self.gaussian_weight = float(gaussian_weight)
+        self.gaussian_inference_weight = float(gaussian_inference_weight)
+        self.recon_weight = float(recon_weight)
+        self.lowfreq_weight = float(lowfreq_weight)
+        self.lowfreq_kernel_size = int(lowfreq_kernel_size)
+        self.no_gaussian_weight = float(no_gaussian_weight)
+        self.endpoint_weight = float(endpoint_weight)
+        self.inference_lowpass_ecg = bool(inference_lowpass_ecg)
+        self.inference_highfreq_weight = float(inference_highfreq_weight)
+        self.sampler = str(sampler).lower()
+        self.velocity_clip = float(velocity_clip)
+        self.state_clip = float(state_clip)
+        self.output_blend = float(output_blend)
+        self.gaussian_scale = float(gaussian_scale)
+        self.ecg_velocity_model = EDDMNoiseUNet1d(
+            in_channels=2,
+            base_channels=int(base_channels),
+            channel_mults=tuple(channel_mults),
+            time_dim=int(time_dim),
+            dropout=float(dropout),
+            pool_scales=tuple(pool_scales),
+            attention_heads=int(attention_heads),
+        )
+        self.gaussian_velocity_model = EDDMNoiseUNet1d(
+            in_channels=2,
+            base_channels=int(base_channels),
+            channel_mults=tuple(channel_mults),
+            time_dim=int(time_dim),
+            dropout=float(dropout),
+            pool_scales=tuple(pool_scales),
+            attention_heads=int(attention_heads),
+        )
+
+        step_index = torch.arange(1, self.timesteps + 1, dtype=torch.float64)
+        linear_decrease = self.timesteps - step_index + 1.0
+        alpha_t = (linear_decrease / linear_decrease.sum()).to(torch.float32)
+        beta_t = (
+            self.gaussian_scale * linear_decrease / linear_decrease.pow(2).sum().sqrt()
+        ).to(torch.float32)
+        alpha_bar = torch.cumsum(alpha_t, dim=0)
+        beta_bar = torch.sqrt(torch.cumsum(beta_t.pow(2), dim=0))
+        alpha_bar_prev = F.pad(alpha_bar[:-1], (1, 0), value=0.0)
+        beta_bar_prev = F.pad(beta_bar[:-1], (1, 0), value=0.0)
+
+        self.register_buffer("alpha_t", alpha_t)
+        self.register_buffer("beta_t", beta_t)
+        self.register_buffer("alpha_bar", alpha_bar)
+        self.register_buffer("beta_bar", beta_bar)
+        self.register_buffer("alpha_bar_prev", alpha_bar_prev)
+        self.register_buffer("beta_bar_prev", beta_bar_prev)
+
+    def _robust_scale(self, x):
+        scale = x.detach().abs().mean(dim=-1, keepdim=True)
+        scale = scale + 0.25 * x.detach().std(dim=-1, keepdim=True)
+        return scale.clamp_min(1.0e-4)
+
+    def _clip_by_robust_scale(self, x, multiple):
+        if multiple <= 0:
+            return x
+        bound = float(multiple) * self._robust_scale(x)
+        return torch.clamp(x, min=-bound, max=bound)
+
+    def _smooth_1d(self, x, kernel_size):
+        if kernel_size <= 1:
+            return x
+        kernel_size = min(kernel_size, x.shape[-1] if x.shape[-1] % 2 == 1 else x.shape[-1] - 1)
+        kernel_size = max(kernel_size, 1)
+        return F.avg_pool1d(x, kernel_size=kernel_size, stride=1, padding=kernel_size // 2, count_include_pad=False)
+
+    def _project_inference_ecg_noise(self, ecg_noise):
+        if not self.inference_lowpass_ecg:
+            return ecg_noise
+        low = self._smooth_1d(ecg_noise, self.lowfreq_kernel_size)
+        high = ecg_noise - low
+        return low + self.inference_highfreq_weight * high
+
+    def _loss_elementwise(self, prediction, target):
+        if self.loss_type == "l1":
+            return F.l1_loss(prediction, target, reduction="none")
+        if self.loss_type == "mse":
+            return F.mse_loss(prediction, target, reduction="none")
+        return F.smooth_l1_loss(prediction, target, reduction="none")
+
+    def _coefficients(self, t):
+        if t.dtype == torch.long:
+            return torch.stack([self.alpha_bar[t], self.beta_bar[t]], dim=1)
+        t = t.float().clamp(0.0, 1.0)
+        return torch.stack([t, self.gaussian_scale * torch.sqrt(t.clamp_min(0.0))], dim=1)
+
+    def _predict_components(self, xt, noisy, t):
+        xt = self._clip_by_robust_scale(torch.nan_to_num(xt), self.state_clip)
+        model_input = torch.cat([xt, noisy], dim=1)
+        coefficients = self._coefficients(t)
+        ecg_velocity = self.ecg_velocity_model(model_input, coefficients)
+        gaussian_velocity = self.gaussian_velocity_model(model_input, coefficients)
+        return (
+            self._clip_by_robust_scale(torch.nan_to_num(ecg_velocity), self.velocity_clip),
+            self._clip_by_robust_scale(torch.nan_to_num(gaussian_velocity), self.velocity_clip),
+        )
+
+    def forward(self, x):
+        squeeze = False
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+            squeeze = True
+        noisy = x
+        current = x
+        for t_value in reversed(range(self.timesteps)):
+            t = torch.full((x.shape[0],), t_value, device=x.device, dtype=torch.long)
+            ecg_velocity, gaussian_velocity = self._predict_components(current, noisy, t)
+            ecg_velocity = self._project_inference_ecg_noise(ecg_velocity)
+            alpha_delta = (self.alpha_bar[t] - self.alpha_bar_prev[t]).view(-1, 1, 1)
+            beta_delta = (self.beta_bar[t] - self.beta_bar_prev[t]).view(-1, 1, 1)
+            delta = alpha_delta * ecg_velocity
+            if self.gaussian_inference_weight > 0:
+                delta = delta + self.gaussian_inference_weight * beta_delta * gaussian_velocity
+            if self.sampler == "heun" and t_value > 0:
+                provisional = self._clip_by_robust_scale(torch.nan_to_num(current - delta), self.state_clip)
+                prev_t = torch.full((x.shape[0],), t_value - 1, device=x.device, dtype=torch.long)
+                ecg_velocity_2, gaussian_velocity_2 = self._predict_components(provisional, noisy, prev_t)
+                ecg_velocity_2 = self._project_inference_ecg_noise(ecg_velocity_2)
+                corrected_delta = alpha_delta * 0.5 * (ecg_velocity + ecg_velocity_2)
+                if self.gaussian_inference_weight > 0:
+                    corrected_delta = corrected_delta + self.gaussian_inference_weight * beta_delta * 0.5 * (
+                        gaussian_velocity + gaussian_velocity_2
+                    )
+                current = current - corrected_delta
+            else:
+                current = current - delta
+            current = self._clip_by_robust_scale(torch.nan_to_num(current), self.state_clip)
+        output = noisy + self.output_blend * (current - noisy)
+        return output.squeeze(1) if squeeze else output
+
+    @torch.no_grad()
+    def denoising(self, x):
+        if self.num_shots <= 1:
+            return self.forward(x)
+        return torch.stack([self.forward(x) for _ in range(self.num_shots)], dim=0).mean(dim=0)
+
+    def compute_loss(self, batch, device, **kwargs):
+        noisy, clean = batch[0].to(device), batch[1].to(device)
+        valid_mask = batch[2].to(device) if len(batch) > 2 else None
+        if noisy.ndim == 2:
+            noisy = noisy.unsqueeze(1)
+        if clean.ndim == 2:
+            clean = clean.unsqueeze(1)
+
+        batch_size = noisy.shape[0]
+        t = torch.randint(0, self.timesteps, (batch_size,), device=device, dtype=torch.long)
+        ecg_noise = self._clip_by_robust_scale(
+            torch.nan_to_num(noisy - clean),
+            self.velocity_clip,
+        )
+        gaussian_noise = torch.randn_like(clean)
+        alpha_bar = self.alpha_bar[t].view(-1, 1, 1)
+        beta_bar = self.beta_bar[t].view(-1, 1, 1)
+        xt = clean + alpha_bar * ecg_noise + beta_bar * gaussian_noise
+        predicted_ecg, predicted_gaussian = self._predict_components(xt, noisy, t)
+        ecg_loss = self._loss_elementwise(predicted_ecg, ecg_noise)
+        gaussian_loss = self._loss_elementwise(predicted_gaussian, gaussian_noise)
+        loss = self.ecg_weight * ecg_loss + self.gaussian_weight * gaussian_loss
+
+        if self.recon_weight > 0:
+            clean_hat = xt - alpha_bar * predicted_ecg - beta_bar * predicted_gaussian
+            recon_loss = self._loss_elementwise(clean_hat, clean)
+            loss = loss + self.recon_weight * recon_loss
+
+        if self.lowfreq_weight > 0:
+            predicted_low = self._smooth_1d(predicted_ecg, self.lowfreq_kernel_size)
+            target_low = self._smooth_1d(ecg_noise, self.lowfreq_kernel_size)
+            lowfreq_loss = self._loss_elementwise(predicted_low, target_low)
+            loss = loss + self.lowfreq_weight * lowfreq_loss
+
+        if self.no_gaussian_weight > 0:
+            xt_no_gaussian = clean + alpha_bar * ecg_noise
+            predicted_ecg_ng, _ = self._predict_components(xt_no_gaussian, noisy, t)
+            clean_hat_ng = xt_no_gaussian - alpha_bar * predicted_ecg_ng
+            no_gaussian_loss = self._loss_elementwise(predicted_ecg_ng, ecg_noise)
+            no_gaussian_recon = self._loss_elementwise(clean_hat_ng, clean)
+            loss = loss + self.no_gaussian_weight * (no_gaussian_loss + self.recon_weight * no_gaussian_recon)
+
+        if self.endpoint_weight > 0:
+            endpoint_t = torch.full((batch_size,), self.timesteps - 1, device=device, dtype=torch.long)
+            predicted_endpoint_ecg, _ = self._predict_components(noisy, noisy, endpoint_t)
+            endpoint_clean_hat = noisy - predicted_endpoint_ecg
+            endpoint_loss = self._loss_elementwise(predicted_endpoint_ecg, ecg_noise)
+            endpoint_recon = self._loss_elementwise(endpoint_clean_hat, clean)
+            endpoint_low = self._loss_elementwise(
+                self._smooth_1d(predicted_endpoint_ecg, self.lowfreq_kernel_size),
+                self._smooth_1d(ecg_noise, self.lowfreq_kernel_size),
+            )
+            loss = loss + self.endpoint_weight * (
+                endpoint_loss
+                + self.recon_weight * endpoint_recon
+                + self.lowfreq_weight * endpoint_low
+            )
+
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(device, dtype=clean.dtype)
+            if valid_mask.ndim == 2:
+                valid_mask = valid_mask.unsqueeze(1)
+            return (loss * valid_mask).sum() / valid_mask.sum().clamp_min(1.0)
+        return loss.mean()

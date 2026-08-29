@@ -32,7 +32,7 @@ Options:
   --nstdb-raw PATH       Raw NSTDB WFDB directory for 100% DeepFilter/MECG-E prep.
   --prepare-raw          Recreate dataset_bw_nv*.pkl from raw QTDB/NSTDB before training.
   --device DEVICE       Training/inference device. Default: cuda:0
-  --model NAME          One of: all, main, eddm_1shot.
+  --model NAME          One of: all, main, stable, eddm_fm, eddm_1shot.
   --seed N              Run one seed only. Required for a single model/seed job.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
   --skip-robustness     Only run train + QTDB pkl test.
@@ -45,6 +45,8 @@ Environment overrides:
 
 Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model stable --seed 42 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 42 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 42 --nv 1 --device cuda:0
 
 100% DeepFilter/MECG-E raw-prep example:
@@ -117,11 +119,17 @@ normalize_model() {
     main|mambattention|mambattention_stfrft_dualpath_dapp_cfm_unet_bd)
       printf '%s\n' "main"
       ;;
+    stable|mambattention_stfrft_dualpath_dapp_stable_cfm_unet)
+      printf '%s\n' "stable"
+      ;;
+    eddm_fm|eddm_flow_matching)
+      printf '%s\n' "eddm_fm"
+      ;;
     eddm|eddm_1shot)
       printf '%s\n' "eddm_1shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, main, eddm_1shot." >&2
+      echo "Unsupported --model '$1'. Expected one of: all, main, stable, eddm_fm, eddm_1shot." >&2
       exit 2
       ;;
   esac
@@ -255,6 +263,12 @@ prepare_raw_if_needed
 MAIN_CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_cfm_unet_bd.yaml"
 MAIN_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_cfm_unet_bd"
 MAIN_MODEL_NAME="mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg"
+STABLE_CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_stable_cfm_unet.yaml"
+STABLE_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_stable_cfm_unet"
+STABLE_MODEL_NAME="mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg"
+EDDM_FM_CONFIG="configs/mecge_table1_repro_eddm_flow_matching.yaml"
+EDDM_FM_RESULT_MODEL="eddm_flow_matching"
+EDDM_FM_MODEL_NAME="eddm_flow_matching"
 EDDM_CONFIG="configs/mecge_table1_repro_eddm_1shot.yaml"
 EDDM_RESULT_MODEL="eddm_1shot"
 EDDM_MODEL_NAME="eddm"
@@ -262,10 +276,12 @@ EDDM_MODEL_NAME="eddm"
 case "$TARGET_MODEL" in
   all)
     if [[ -n "$TARGET_SEED" ]]; then
-      echo "--seed can only be used with --model main or --model eddm_1shot." >&2
+      echo "--seed can only be used with --model main, stable, eddm_fm, or eddm_1shot." >&2
       exit 2
     fi
     run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN"
+    run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN"
+    run_model_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN"
     run_model_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM"
     ;;
   main)
@@ -274,6 +290,20 @@ case "$TARGET_MODEL" in
       exit 2
     fi
     run_one_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$TARGET_SEED"
+    ;;
+  stable)
+    if [[ -z "$TARGET_SEED" ]]; then
+      echo "--model stable requires --seed N for a single model/seed job." >&2
+      exit 2
+    fi
+    run_one_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$TARGET_SEED"
+    ;;
+  eddm_fm)
+    if [[ -z "$TARGET_SEED" ]]; then
+      echo "--model eddm_fm requires --seed N for a single model/seed job." >&2
+      exit 2
+    fi
+    run_one_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$TARGET_SEED"
     ;;
   eddm_1shot)
     if [[ -z "$TARGET_SEED" ]]; then

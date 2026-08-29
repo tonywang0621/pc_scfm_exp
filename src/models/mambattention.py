@@ -863,6 +863,11 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
             valid_mask = valid_mask.to(noisy_audio.device)
 
         base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        base_restored = torch.nan_to_num(base_restored).clamp(-1.0e4, 1.0e4)
+        com_g = torch.nan_to_num(com_g).clamp(-1.0e4, 1.0e4)
+        baseline_hat = torch.nan_to_num(baseline_hat).clamp(-1.0e4, 1.0e4)
+        residual_delta_hat = torch.nan_to_num(residual_delta_hat).clamp(-1.0e4, 1.0e4)
+        direct_restored = torch.nan_to_num(direct_restored).clamp(-1.0e4, 1.0e4)
         refined, flow_hat, condition, clean_path, baseline_path = self._refine_from_base(
             noisy_audio,
             base_restored,
@@ -984,6 +989,15 @@ class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMamb
             loss = loss + self.lambda_gaussian_noise_aux * self._masked_mean(gaussian_loss.squeeze(1), valid_mask)
         return loss
 
+    def _sanitize_component_outputs(self, base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored):
+        return (
+            torch.nan_to_num(base_restored).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(com_g).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(baseline_hat).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(residual_delta_hat).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(direct_restored).clamp(-1.0e4, 1.0e4),
+        )
+
     def forward(self, clean_audio, noisy_audio, valid_mask=None):
         norm_factor = self._norm_factor(noisy_audio)
         clean_audio = (clean_audio * norm_factor).squeeze(1)
@@ -992,6 +1006,11 @@ class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMamb
             valid_mask = valid_mask.to(noisy_audio.device)
 
         base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        base_restored = torch.nan_to_num(base_restored).clamp(-1.0e4, 1.0e4)
+        com_g = torch.nan_to_num(com_g).clamp(-1.0e4, 1.0e4)
+        baseline_hat = torch.nan_to_num(baseline_hat).clamp(-1.0e4, 1.0e4)
+        residual_delta_hat = torch.nan_to_num(residual_delta_hat).clamp(-1.0e4, 1.0e4)
+        direct_restored = torch.nan_to_num(direct_restored).clamp(-1.0e4, 1.0e4)
         refined, flow_hat, condition, clean_path, baseline_path = self._refine_from_base(
             noisy_audio,
             base_restored,
@@ -1012,6 +1031,186 @@ class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMamb
             residual_target = clean_audio.unsqueeze(1) - direct_restored.unsqueeze(1)
             baseline_loss = F.mse_loss(baseline_hat, baseline_target, reduction="none")
             residual_loss = F.mse_loss(residual_delta_hat, residual_target, reduction="none")
+            loss = loss + self.lambda_dual_baseline * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+            loss = loss + self.lambda_dual_residual * self._masked_mean(residual_loss.squeeze(1), valid_mask)
+        if "cfm" in self.loss_fn or "flow_matching" in self.loss_fn:
+            estimated_baseline = noisy_audio - base_restored.detach()
+            true_baseline = noisy_audio - clean_audio.unsqueeze(1)
+            target_clean_residual = clean_audio.unsqueeze(1) - base_restored.detach()
+            target_baseline_residual = true_baseline - estimated_baseline
+            target_residual = torch.cat([target_clean_residual, target_baseline_residual], dim=1)
+            channel_weight = [self.lambda_cfm, self.lambda_cfm_baseline]
+            loss = loss + self._flow_matching_loss(
+                condition.detach(),
+                target_residual.detach(),
+                channel_weight=channel_weight,
+                valid_mask=valid_mask,
+            )
+            loss = loss + self._cfm_auxiliary_losses(
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                refined,
+                flow_hat,
+                clean_path,
+                baseline_path,
+                valid_mask=valid_mask,
+            )
+        if "noise_aux" in self.loss_fn:
+            loss = loss + self._noise_auxiliary_loss(
+                condition,
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                valid_mask=valid_mask,
+            )
+        return loss
+
+
+class StableUNetResidualFlowDualPathDAPPMambAttentionCore(UNetResidualFlowDualPathDAPPMambAttentionCore):
+    """Numerically conservative UNet-CFM refiner for QTDB/NSTDB baseline removal.
+
+    The architecture keeps the same STFrFT + dual-path DAPP + Mamba + attention
+    backbone and UNet conditional flow head, but bounds residual-flow state,
+    targets, and velocities. This prevents rare large NSTDB/QTDB windows from
+    turning the flow MSE into non-finite loss while still learning a correction
+    path on top of the base denoiser.
+    """
+
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        h = self.h
+        self.cfm_condition_clip = float(h.get("cfm_condition_clip", 8.0))
+        self.cfm_target_clip = float(h.get("cfm_target_clip", 6.0))
+        self.cfm_velocity_clip = float(h.get("cfm_velocity_clip", 4.0))
+        self.cfm_state_clip = float(h.get("cfm_state_clip", 6.0))
+        self.cfm_aux_clip = float(h.get("cfm_aux_clip", 6.0))
+        self.cfm_loss_type = str(h.get("cfm_loss_type", "smooth_l1")).lower()
+
+    def _robust_scale(self, x):
+        scale = x.detach().abs().mean(dim=-1, keepdim=True)
+        scale = scale + 0.25 * x.detach().std(dim=-1, keepdim=True)
+        return scale.clamp_min(1.0e-4)
+
+    def _clip_by_robust_scale(self, x, multiple):
+        if multiple <= 0:
+            return x
+        scale = self._robust_scale(x)
+        bound = float(multiple) * scale
+        return torch.clamp(x, min=-bound, max=bound)
+
+    def _flow_condition(self, noisy_audio, base_restored, baseline_hat=None):
+        condition = super()._flow_condition(noisy_audio, base_restored, baseline_hat=baseline_hat)
+        return self._clip_by_robust_scale(torch.nan_to_num(condition), self.cfm_condition_clip)
+
+    def _split_unet_output(self, output):
+        velocity, auxiliary = super()._split_unet_output(torch.nan_to_num(output))
+        velocity = self._clip_by_robust_scale(velocity, self.cfm_velocity_clip)
+        if auxiliary is not None:
+            auxiliary = self._clip_by_robust_scale(auxiliary, self.cfm_aux_clip)
+        return velocity, auxiliary
+
+    def _sample_flow_start(self, target_residual):
+        start = super()._sample_flow_start(target_residual)
+        return self._clip_by_robust_scale(torch.nan_to_num(start), self.cfm_state_clip)
+
+    def _flow_matching_loss(self, condition, target_residual, channel_weight=1.0, valid_mask=None):
+        condition = self._clip_by_robust_scale(torch.nan_to_num(condition), self.cfm_condition_clip)
+        target_residual = self._clip_by_robust_scale(torch.nan_to_num(target_residual), self.cfm_target_clip)
+        start = self._sample_flow_start(target_residual)
+        t = torch.rand((target_residual.shape[0],), device=target_residual.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_residual)
+        residual_state = (1.0 - t_view) * start + t_view * target_residual + bridge_noise
+        residual_state = self._clip_by_robust_scale(torch.nan_to_num(residual_state), self.cfm_state_clip)
+        target_velocity = self._clip_by_robust_scale(target_residual - start, self.cfm_velocity_clip)
+        predicted_velocity, _ = self._split_unet_output(self.residual_flow(residual_state, condition, t))
+        if self.cfm_loss_type == "mse":
+            loss = F.mse_loss(predicted_velocity, target_velocity, reduction="none")
+        else:
+            loss = F.smooth_l1_loss(predicted_velocity, target_velocity, reduction="none")
+        weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
+        return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
+
+    def _integrate_residual_flow(self, condition, steps=None):
+        condition = self._clip_by_robust_scale(torch.nan_to_num(condition), self.cfm_condition_clip)
+        steps = int(steps or self.cfm_inference_steps)
+        steps = max(steps, 1)
+        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        dt = 1.0 / steps
+        for step in range(steps):
+            t_value = (step + 0.5) / steps
+            t = torch.full((condition.shape[0],), t_value, device=condition.device, dtype=condition.dtype)
+            velocity, _ = self._split_unet_output(self.residual_flow(residual, condition, t))
+            residual = residual + dt * velocity
+            residual = self._clip_by_robust_scale(torch.nan_to_num(residual), self.cfm_state_clip)
+        return residual
+
+    def _noise_auxiliary_loss(self, condition, clean_audio, noisy_audio, base_restored, valid_mask=None):
+        if self.cfm_unet_aux_channels < 2 or self.lambda_ecg_noise_aux + self.lambda_gaussian_noise_aux <= 0:
+            return clean_audio.new_tensor(0.0)
+        condition = self._clip_by_robust_scale(torch.nan_to_num(condition), self.cfm_condition_clip)
+        true_baseline = self._clip_by_robust_scale(
+            torch.nan_to_num(noisy_audio - clean_audio.unsqueeze(1)),
+            self.cfm_aux_clip,
+        )
+        gaussian_noise = torch.randn_like(true_baseline)
+        t = torch.rand((true_baseline.shape[0],), device=true_baseline.device)
+        t_view = t.view(-1, 1, 1)
+        sigma = self.gaussian_aux_scale * torch.sqrt((t_view * (1.0 - t_view)).clamp_min(1.0e-8))
+        xt = clean_audio.unsqueeze(1) + t_view * true_baseline + sigma * gaussian_noise
+        aux_state = torch.cat([xt - base_restored.detach(), noisy_audio - xt], dim=1)
+        aux_state = self._clip_by_robust_scale(torch.nan_to_num(aux_state), self.cfm_state_clip)
+        _, auxiliary = self._split_unet_output(self.residual_flow(aux_state, condition.detach(), t))
+        if auxiliary is None or auxiliary.shape[1] < 2:
+            return clean_audio.new_tensor(0.0)
+        baseline_loss = F.smooth_l1_loss(auxiliary[:, 0:1], true_baseline.detach(), reduction="none")
+        gaussian_loss = F.smooth_l1_loss(auxiliary[:, 1:2], gaussian_noise.detach(), reduction="none")
+        loss = clean_audio.new_tensor(0.0)
+        if self.lambda_ecg_noise_aux > 0:
+            loss = loss + self.lambda_ecg_noise_aux * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+        if self.lambda_gaussian_noise_aux > 0:
+            loss = loss + self.lambda_gaussian_noise_aux * self._masked_mean(gaussian_loss.squeeze(1), valid_mask)
+        return loss
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._sanitize_component_outputs(
+            base_restored,
+            com_g,
+            baseline_hat,
+            residual_delta_hat,
+            direct_restored,
+        )
+        refined, flow_hat, condition, clean_path, baseline_path = self._refine_from_base(
+            noisy_audio,
+            base_restored,
+            baseline_hat=baseline_hat,
+        )
+        refined = torch.nan_to_num(refined)
+        refined_audio = refined.squeeze(1)
+        direct_restored = direct_restored.squeeze(1)
+
+        loss = self._ecg_loss(
+            clean_audio,
+            refined_audio,
+            norm_factor,
+            predicted_com=com_g,
+            valid_mask=valid_mask,
+        )
+        if "dual" in self.loss_fn or "dual_noise" in self.loss_fn:
+            baseline_target = torch.nan_to_num(noisy_audio - clean_audio.unsqueeze(1))
+            residual_target = torch.nan_to_num(clean_audio.unsqueeze(1) - direct_restored.unsqueeze(1))
+            baseline_target = self._clip_by_robust_scale(baseline_target, self.cfm_aux_clip)
+            residual_target = self._clip_by_robust_scale(residual_target, self.cfm_aux_clip)
+            baseline_loss = F.smooth_l1_loss(baseline_hat, baseline_target, reduction="none")
+            residual_loss = F.smooth_l1_loss(residual_delta_hat, residual_target, reduction="none")
             loss = loss + self.lambda_dual_baseline * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
             loss = loss + self.lambda_dual_residual * self._masked_mean(residual_loss.squeeze(1), valid_mask)
         if "cfm" in self.loss_fn or "flow_matching" in self.loss_fn:
@@ -1297,6 +1496,18 @@ class MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser(ECGDenoi
     def __init__(self, **kwargs):
         nn.Module.__init__(self)
         self.core = UNetResidualFlowDualPathDAPPMambAttentionCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
+
+
+@register_model("mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg")
+class MambAttentionSTFrFTDualPathDAPPStableCFMUNetECGDenoiser(ECGDenoisingModel):
+    block_cls = MambAttentionBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = StableUNetResidualFlowDualPathDAPPMambAttentionCore(
             {"model": kwargs},
             block_cls=self.block_cls,
         )
