@@ -68,6 +68,9 @@ case "$MODEL" in
   eddm_flow_matching|eddm_fm)
     CONFIG="configs/mecge_table1_repro_eddm_flow_matching.yaml"
     ;;
+  eddm_flow_matching_mamba|eddm_fm_mamba)
+    CONFIG="configs/mecge_table1_repro_eddm_flow_matching_mamba.yaml"
+    ;;
   fcn_dae|fcndae)
     CONFIG="configs/ecg_baseline_wander_fcn_dae.yaml"
     ;;
@@ -94,7 +97,7 @@ case "$MODEL" in
     ;;
   *)
     echo "Unknown model: $MODEL" >&2
-    echo "Expected one of: pc_scfm, pc_scfm_rl_no_flow, pc_scfm_rl_no_flow_no_attention, mecg_e, mambattention, mambattention_stfrft, mambattention_stfrft_bag, mambattention_stfrft_lf_morph, mambattention_stfrft_dualpath_dapp, mambattention_stfrft_dualpath_dapp_h4, mambattention_stfrft_dualpath_dapp_h16, mambattention_stfrft_dualpath_dapp_h32, mambattention_stfrft_dualpath_dapp_v2, mambattention_stfrft_dualpath_dapp_cfm_residual, mambattention_stfrft_dualpath_dapp_cfm_unet_bd, mambattention_stfrft_dualpath_dapp_stable_cfm_unet, mambattention_stfrft_eddm_distill, eddm, eddm_flow_matching, fcn_dae, deepfilter, descod_ecg_1shot, descod_ecg_5shot, descod_ecg_10shot, drnn, fir_filter, iir_filter, or a configs/*.yaml path" >&2
+    echo "Expected one of: pc_scfm, pc_scfm_rl_no_flow, pc_scfm_rl_no_flow_no_attention, mecg_e, mambattention, mambattention_stfrft, mambattention_stfrft_bag, mambattention_stfrft_lf_morph, mambattention_stfrft_dualpath_dapp, mambattention_stfrft_dualpath_dapp_h4, mambattention_stfrft_dualpath_dapp_h16, mambattention_stfrft_dualpath_dapp_h32, mambattention_stfrft_dualpath_dapp_v2, mambattention_stfrft_dualpath_dapp_cfm_residual, mambattention_stfrft_dualpath_dapp_cfm_unet_bd, mambattention_stfrft_dualpath_dapp_stable_cfm_unet, mambattention_stfrft_eddm_distill, eddm, eddm_flow_matching, eddm_flow_matching_mamba, fcn_dae, deepfilter, descod_ecg_1shot, descod_ecg_5shot, descod_ecg_10shot, drnn, fir_filter, iir_filter, or a configs/*.yaml path" >&2
     exit 2
     ;;
 esac

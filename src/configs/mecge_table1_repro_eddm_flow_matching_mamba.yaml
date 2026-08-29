@@ -1,0 +1,119 @@
+data_dir: "../data/mecge_table1_repro"
+root_dir: "../runs/mecge_table1_repro/eddm_flow_matching_mamba"
+
+checkpoint_dir: "${root_dir}/checkpoint"
+results_dir: "${root_dir}/results"
+log_dir: "${root_dir}/log"
+
+exp_name: eddm_flow_matching_mamba__qtdb_train_qtdb_test__nv1__seed42
+model_name: eddm_flow_matching_mamba
+seed: 42
+log_tensorboard: True
+log_config: False
+log_model_architecture: False
+
+training:
+  train_epochs: 50000
+  batch_size: 64
+  lr: 6.0e-6
+  optimizer: RAdam
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
+  scheduler: ReduceLROnPlateau
+  factor: 0.5
+  lr_scheduler_patience_epochs: 5
+  lr_scheduler_min_delta: 1.0e-4
+  min_lr: 1.0e-7
+  grad_clip_norm: 0.25
+  eval_every_epochs: 1
+  validation_metrics_every_epochs: 1
+  save_every_epochs: 50
+  early_stopping_patience_epochs: 35
+  early_stopping_min_delta: 1.0e-4
+  selection_metric: val_loss
+  progress_bar: True
+  resume: False
+  resume_checkpoint: null
+
+evaluation:
+  low_frequency_high_hz: 0.5
+
+dataset:
+  name: ecg_baseline_wander
+  data_dir: "${data_dir}"
+  pkl_file: "${data_dir}/raw/dataset_bw_nv1.pkl"
+  pkl_validation_ratio: 0.3
+  pkl_validation_random_state: 1
+  train_dataset: qtdb
+  external_test_datasets: []
+  test_label: qtdb_pkl_test
+  lead: single
+  split:
+    strategy: mecge_official_pkl
+    patient_wise: false
+    ratio: [0.7, 0.3, 0.0]
+  resample_hz: 360
+  window_size: 512
+  overlap_ratio: 0.0
+  normalization: mecge_official_pkl
+  baseline_wander:
+    train_source: mecge_official_pkl
+    alpha_mode: peak_to_peak_ratio
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
+    test_types:
+      - nstdb
+  eps: 1.0e-10
+
+model:
+  timesteps: 24
+  num_shots: 1
+  base_channels: 64
+  channel_mults: [1, 2, 4, 8]
+  time_dim: 256
+  dropout: 0.0
+  pool_scales: [3, 5, 9, 15]
+  attention_heads: 4
+  loss_type: smooth_l1
+  ecg_weight: 1.0
+  gaussian_weight: 0.10
+  gaussian_inference_weight: 0.0
+  recon_weight: 0.25
+  lowfreq_weight: 0.16
+  highfreq_weight: 0.06
+  baseline_smooth_weight: 0.04
+  baseline_spectrum_weight: 0.04
+  spectrum_n_fft: 1024
+  spectrum_low_hz: 0.8
+  sampling_rate: 360
+  lowfreq_kernel_size: 129
+  lowfreq_kernel_sizes: [65, 129, 257]
+  no_gaussian_weight: 0.80
+  endpoint_weight: 1.00
+  inference_lowpass_ecg: true
+  inference_highfreq_weight: 0.06
+  sampler: heun
+  shared_backbone: true
+  final_endpoint_blend: 0.25
+  final_lowpass_baseline: true
+  mamba_layers: 1
+  mamba_d_state: 16
+  mamba_d_conv: 4
+  mamba_expand: 2
+  mamba_norm_epsilon: 1.0e-5
+  mamba_gate_init: 0.08
+  bottleneck_dilated_conv: true
+  bottleneck_dilations: [1, 2, 4, 8]
+  bottleneck_dilated_gate_init: 0.12
+  coefficient_embedding: rbf_kan
+  coefficient_basis_count: 16
+  antithetic_weight: 0.25
+  antithetic_ecg_weight: 1.0
+  antithetic_gaussian_weight: 0.25
+  aux_warmup_steps: 1000
+  gaussian_scale: 0.35
+  velocity_clip: 8.0
+  state_clip: 8.0
+  output_blend: 1.0

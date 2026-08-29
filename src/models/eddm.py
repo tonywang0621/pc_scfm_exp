@@ -6,8 +6,10 @@ import torch.nn.functional as F
 
 try:
     from .factory import register_model
+    from .mecg_e import MambaBlock
 except ImportError:
     from factory import register_model
+    from mecg_e import MambaBlock
 
 
 class SinusoidalTimeEmbedding(nn.Module):
@@ -56,6 +58,39 @@ class DiffusionCoefficientEmbedding(nn.Module):
         if emb.shape[1] < self.dim:
             emb = F.pad(emb, (0, self.dim - emb.shape[1]))
         return emb[:, : self.dim]
+
+
+class RBFCoefficientEmbedding(nn.Module):
+    """Small KAN-inspired nonlinear basis embedding for flow coefficients.
+
+    This is intentionally much lighter than replacing the U-Net with KAN
+    layers: it only enriches alpha/beta conditioning with learnable RBF bases.
+    """
+
+    def __init__(self, dim, basis_count=16):
+        super().__init__()
+        self.dim = int(dim)
+        self.basis_count = int(basis_count)
+        centers = torch.linspace(0.0, 1.0, self.basis_count)
+        self.register_buffer("centers", centers)
+        self.log_width = nn.Parameter(torch.zeros(2, self.basis_count))
+        self.proj = nn.Sequential(
+            nn.Linear(2 + 2 * self.basis_count, self.dim),
+            nn.SiLU(),
+            nn.Linear(self.dim, self.dim),
+        )
+
+    def forward(self, coefficients):
+        if coefficients.ndim != 2 or coefficients.shape[1] != 2:
+            raise ValueError(f"Expected coefficients shaped [B, 2], got {tuple(coefficients.shape)}.")
+        values = coefficients.float().clamp(0.0, 1.0)
+        width = F.softplus(self.log_width).clamp_min(1.0e-3)
+        basis = torch.exp(
+            -((values.unsqueeze(-1) - self.centers.view(1, 1, -1)) ** 2)
+            * width.view(1, 2, -1)
+        )
+        features = torch.cat([values, basis.flatten(1)], dim=1)
+        return self.proj(features)
 
 
 class ConvBlock1d(nn.Module):
@@ -144,6 +179,77 @@ class SelfAttention1d(nn.Module):
         return residual + attended.transpose(1, 2)
 
 
+class MambaBottleneck1d(nn.Module):
+    def __init__(
+        self,
+        channels,
+        n_layer=1,
+        d_state=16,
+        d_conv=4,
+        expand=2,
+        norm_epsilon=1.0e-5,
+        gate_init=0.10,
+    ):
+        super().__init__()
+        self.norm = nn.GroupNorm(1, channels)
+        self.mamba = MambaBlock(
+            int(channels),
+            n_layer=int(n_layer),
+            bidirectional=False,
+            d_state=int(d_state),
+            d_conv=int(d_conv),
+            expand=int(expand),
+            norm_epsilon=float(norm_epsilon),
+        )
+        gate_init = min(max(float(gate_init), 1.0e-6), 1.0 - 1.0e-6)
+        self.gate_raw = nn.Parameter(torch.tensor(math.log(gate_init / (1.0 - gate_init)), dtype=torch.float32))
+
+    def forward(self, x):
+        residual = x
+        sequence = self.norm(x).transpose(1, 2)
+        out = self.mamba(sequence).transpose(1, 2)
+        gate = torch.sigmoid(self.gate_raw)
+        return residual + gate * out
+
+
+class DilatedConvBottleneck1d(nn.Module):
+    def __init__(self, channels, dilations=(1, 2, 4, 8), dropout=0.0, gate_init=0.15):
+        super().__init__()
+        self.branches = nn.ModuleList()
+        for dilation in tuple(dilations):
+            dilation = int(dilation)
+            self.branches.append(
+                nn.Sequential(
+                    nn.GroupNorm(1, channels),
+                    nn.SiLU(),
+                    nn.Conv1d(
+                        int(channels),
+                        int(channels),
+                        kernel_size=3,
+                        padding=dilation,
+                        dilation=dilation,
+                        groups=int(channels),
+                    ),
+                    nn.Conv1d(int(channels), int(channels), kernel_size=1),
+                    nn.Dropout(float(dropout)),
+                )
+            )
+        self.fuse = nn.Sequential(
+            nn.GroupNorm(1, int(channels) * len(self.branches)),
+            nn.SiLU(),
+            nn.Conv1d(int(channels) * len(self.branches), int(channels), kernel_size=1),
+        )
+        gate_init = min(max(float(gate_init), 1.0e-6), 1.0 - 1.0e-6)
+        self.gate_raw = nn.Parameter(torch.tensor(math.log(gate_init / (1.0 - gate_init)), dtype=torch.float32))
+
+    def forward(self, x):
+        if not self.branches:
+            return x
+        features = [branch(x) for branch in self.branches]
+        residual = self.fuse(torch.cat(features, dim=1))
+        return x + torch.sigmoid(self.gate_raw) * residual
+
+
 class DownBlock1d(nn.Module):
     def __init__(self, in_channels, out_channels, time_dim, dropout=0.0):
         super().__init__()
@@ -179,10 +285,25 @@ class EDDMNoiseUNet1d(nn.Module):
         dropout=0.0,
         pool_scales=(3, 5, 9, 15),
         attention_heads=4,
+        mamba_layers=0,
+        mamba_d_state=16,
+        mamba_d_conv=4,
+        mamba_expand=2,
+        mamba_norm_epsilon=1.0e-5,
+        mamba_gate_init=0.10,
+        bottleneck_dilated_conv=False,
+        bottleneck_dilations=(1, 2, 4, 8),
+        bottleneck_dilated_gate_init=0.15,
+        coefficient_embedding="sinusoidal",
+        coefficient_basis_count=16,
     ):
         super().__init__()
+        if str(coefficient_embedding).lower() in {"rbf", "kan", "rbf_kan"}:
+            embedding = RBFCoefficientEmbedding(time_dim, basis_count=int(coefficient_basis_count))
+        else:
+            embedding = DiffusionCoefficientEmbedding(time_dim)
         self.time_mlp = nn.Sequential(
-            DiffusionCoefficientEmbedding(time_dim),
+            embedding,
             nn.Linear(time_dim, time_dim),
             nn.SiLU(),
             nn.Linear(time_dim, time_dim),
@@ -195,13 +316,33 @@ class EDDMNoiseUNet1d(nn.Module):
             self.downs.append(DownBlock1d(in_ch, out_ch, time_dim, dropout=dropout))
             in_ch = out_ch
 
-        self.mid = nn.ModuleList(
-            [
-                ConvBlock1d(channels[-1], channels[-1], time_dim, dropout=dropout),
-                SelfAttention1d(channels[-1], heads=attention_heads),
-                ConvBlock1d(channels[-1], channels[-1], time_dim, dropout=dropout),
-            ]
-        )
+        mid_layers = [
+            ConvBlock1d(channels[-1], channels[-1], time_dim, dropout=dropout),
+            SelfAttention1d(channels[-1], heads=attention_heads),
+        ]
+        if bool(bottleneck_dilated_conv):
+            mid_layers.append(
+                DilatedConvBottleneck1d(
+                    channels[-1],
+                    dilations=tuple(bottleneck_dilations),
+                    dropout=float(dropout),
+                    gate_init=float(bottleneck_dilated_gate_init),
+                )
+            )
+        if int(mamba_layers) > 0:
+            mid_layers.append(
+                MambaBottleneck1d(
+                    channels[-1],
+                    n_layer=int(mamba_layers),
+                    d_state=int(mamba_d_state),
+                    d_conv=int(mamba_d_conv),
+                    expand=int(mamba_expand),
+                    norm_epsilon=float(mamba_norm_epsilon),
+                    gate_init=float(mamba_gate_init),
+                )
+            )
+        mid_layers.append(ConvBlock1d(channels[-1], channels[-1], time_dim, dropout=dropout))
+        self.mid = nn.ModuleList(mid_layers)
         self.first_skip_dapp = DeepAggregationPyramidPooling1d(
             channels[0],
             pool_scales=pool_scales,
@@ -466,8 +607,14 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         gaussian_inference_weight=0.10,
         recon_weight=0.25,
         lowfreq_weight=0.10,
+        highfreq_weight=0.08,
         baseline_smooth_weight=0.05,
+        baseline_spectrum_weight=0.05,
+        spectrum_n_fft=1024,
+        spectrum_low_hz=0.8,
+        sampling_rate=360,
         lowfreq_kernel_size=129,
+        lowfreq_kernel_sizes=None,
         no_gaussian_weight=0.50,
         endpoint_weight=0.50,
         inference_lowpass_ecg=True,
@@ -476,6 +623,21 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         shared_backbone=False,
         final_endpoint_blend=0.25,
         final_lowpass_baseline=True,
+        mamba_layers=0,
+        mamba_d_state=16,
+        mamba_d_conv=4,
+        mamba_expand=2,
+        mamba_norm_epsilon=1.0e-5,
+        mamba_gate_init=0.10,
+        bottleneck_dilated_conv=False,
+        bottleneck_dilations=(1, 2, 4, 8),
+        bottleneck_dilated_gate_init=0.15,
+        coefficient_embedding="sinusoidal",
+        coefficient_basis_count=16,
+        antithetic_weight=0.0,
+        antithetic_ecg_weight=1.0,
+        antithetic_gaussian_weight=0.25,
+        aux_warmup_steps=0,
         velocity_clip=8.0,
         state_clip=8.0,
         output_blend=1.0,
@@ -491,8 +653,16 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         self.gaussian_inference_weight = float(gaussian_inference_weight)
         self.recon_weight = float(recon_weight)
         self.lowfreq_weight = float(lowfreq_weight)
+        self.highfreq_weight = float(highfreq_weight)
         self.baseline_smooth_weight = float(baseline_smooth_weight)
+        self.baseline_spectrum_weight = float(baseline_spectrum_weight)
+        self.spectrum_n_fft = int(spectrum_n_fft)
+        self.spectrum_low_hz = float(spectrum_low_hz)
+        self.sampling_rate = float(sampling_rate)
         self.lowfreq_kernel_size = int(lowfreq_kernel_size)
+        if lowfreq_kernel_sizes is None:
+            lowfreq_kernel_sizes = [self.lowfreq_kernel_size]
+        self.lowfreq_kernel_sizes = tuple(int(kernel) for kernel in lowfreq_kernel_sizes)
         self.no_gaussian_weight = float(no_gaussian_weight)
         self.endpoint_weight = float(endpoint_weight)
         self.inference_lowpass_ecg = bool(inference_lowpass_ecg)
@@ -501,10 +671,15 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         self.shared_backbone = bool(shared_backbone)
         self.final_endpoint_blend = float(final_endpoint_blend)
         self.final_lowpass_baseline = bool(final_lowpass_baseline)
+        self.antithetic_weight = float(antithetic_weight)
+        self.antithetic_ecg_weight = float(antithetic_ecg_weight)
+        self.antithetic_gaussian_weight = float(antithetic_gaussian_weight)
+        self.aux_warmup_steps = int(aux_warmup_steps)
         self.velocity_clip = float(velocity_clip)
         self.state_clip = float(state_clip)
         self.output_blend = float(output_blend)
         self.gaussian_scale = float(gaussian_scale)
+        self.register_buffer("training_step", torch.zeros((), dtype=torch.long))
         if self.shared_backbone:
             self.dual_velocity_model = EDDMNoiseUNet1d(
                 in_channels=2,
@@ -515,6 +690,17 @@ class EDDMFlowMatchingDenoiser(nn.Module):
                 dropout=float(dropout),
                 pool_scales=tuple(pool_scales),
                 attention_heads=int(attention_heads),
+                mamba_layers=int(mamba_layers),
+                mamba_d_state=int(mamba_d_state),
+                mamba_d_conv=int(mamba_d_conv),
+                mamba_expand=int(mamba_expand),
+                mamba_norm_epsilon=float(mamba_norm_epsilon),
+                mamba_gate_init=float(mamba_gate_init),
+                bottleneck_dilated_conv=bool(bottleneck_dilated_conv),
+                bottleneck_dilations=tuple(bottleneck_dilations),
+                bottleneck_dilated_gate_init=float(bottleneck_dilated_gate_init),
+                coefficient_embedding=str(coefficient_embedding),
+                coefficient_basis_count=int(coefficient_basis_count),
             )
             self.ecg_velocity_model = None
             self.gaussian_velocity_model = None
@@ -529,6 +715,17 @@ class EDDMFlowMatchingDenoiser(nn.Module):
                 dropout=float(dropout),
                 pool_scales=tuple(pool_scales),
                 attention_heads=int(attention_heads),
+                mamba_layers=int(mamba_layers),
+                mamba_d_state=int(mamba_d_state),
+                mamba_d_conv=int(mamba_d_conv),
+                mamba_expand=int(mamba_expand),
+                mamba_norm_epsilon=float(mamba_norm_epsilon),
+                mamba_gate_init=float(mamba_gate_init),
+                bottleneck_dilated_conv=bool(bottleneck_dilated_conv),
+                bottleneck_dilations=tuple(bottleneck_dilations),
+                bottleneck_dilated_gate_init=float(bottleneck_dilated_gate_init),
+                coefficient_embedding=str(coefficient_embedding),
+                coefficient_basis_count=int(coefficient_basis_count),
             )
             self.gaussian_velocity_model = EDDMNoiseUNet1d(
                 in_channels=2,
@@ -539,6 +736,17 @@ class EDDMFlowMatchingDenoiser(nn.Module):
                 dropout=float(dropout),
                 pool_scales=tuple(pool_scales),
                 attention_heads=int(attention_heads),
+                mamba_layers=int(mamba_layers),
+                mamba_d_state=int(mamba_d_state),
+                mamba_d_conv=int(mamba_d_conv),
+                mamba_expand=int(mamba_expand),
+                mamba_norm_epsilon=float(mamba_norm_epsilon),
+                mamba_gate_init=float(mamba_gate_init),
+                bottleneck_dilated_conv=bool(bottleneck_dilated_conv),
+                bottleneck_dilations=tuple(bottleneck_dilations),
+                bottleneck_dilated_gate_init=float(bottleneck_dilated_gate_init),
+                coefficient_embedding=str(coefficient_embedding),
+                coefficient_basis_count=int(coefficient_basis_count),
             )
 
         step_index = torch.arange(1, self.timesteps + 1, dtype=torch.float64)
@@ -577,10 +785,16 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         kernel_size = max(kernel_size, 1)
         return F.avg_pool1d(x, kernel_size=kernel_size, stride=1, padding=kernel_size // 2, count_include_pad=False)
 
+    def _multi_scale_lowpass(self, x):
+        if not self.lowfreq_kernel_sizes:
+            return self._smooth_1d(x, self.lowfreq_kernel_size)
+        lowpasses = [self._smooth_1d(x, kernel_size) for kernel_size in self.lowfreq_kernel_sizes]
+        return torch.stack(lowpasses, dim=0).mean(dim=0)
+
     def _project_inference_ecg_noise(self, ecg_noise):
         if not self.inference_lowpass_ecg:
             return ecg_noise
-        low = self._smooth_1d(ecg_noise, self.lowfreq_kernel_size)
+        low = self._multi_scale_lowpass(ecg_noise)
         high = ecg_noise - low
         return low + self.inference_highfreq_weight * high
 
@@ -590,6 +804,24 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         if self.loss_type == "mse":
             return F.mse_loss(prediction, target, reduction="none")
         return F.smooth_l1_loss(prediction, target, reduction="none")
+
+    def _baseline_spectrum_loss(self, predicted_baseline, target_baseline):
+        if self.baseline_spectrum_weight <= 0:
+            return predicted_baseline.new_tensor(0.0)
+        n_fft = max(int(self.spectrum_n_fft), predicted_baseline.shape[-1])
+        max_bin = int(self.spectrum_low_hz * n_fft / max(self.sampling_rate, 1.0)) + 1
+        max_bin = min(max(max_bin, 2), n_fft // 2 + 1)
+        predicted_spec = torch.fft.rfft(predicted_baseline, n=n_fft, dim=-1)[..., :max_bin]
+        target_spec = torch.fft.rfft(target_baseline, n=n_fft, dim=-1)[..., :max_bin]
+        predicted_mag = torch.log1p(predicted_spec.abs())
+        target_mag = torch.log1p(target_spec.abs())
+        return F.smooth_l1_loss(predicted_mag, target_mag, reduction="none").mean(dim=-1, keepdim=True)
+
+    def _aux_ramp(self):
+        if not self.training or self.aux_warmup_steps <= 0:
+            return 1.0
+        step = float(self.training_step.item())
+        return min(max(step / max(float(self.aux_warmup_steps), 1.0), 0.0), 1.0)
 
     def _coefficients(self, t):
         if t.dtype == torch.long:
@@ -668,6 +900,9 @@ class EDDMFlowMatchingDenoiser(nn.Module):
             noisy = noisy.unsqueeze(1)
         if clean.ndim == 2:
             clean = clean.unsqueeze(1)
+        if self.training:
+            self.training_step += 1
+        aux_ramp = self._aux_ramp()
 
         batch_size = noisy.shape[0]
         t = torch.randint(0, self.timesteps, (batch_size,), device=device, dtype=torch.long)
@@ -687,19 +922,35 @@ class EDDMFlowMatchingDenoiser(nn.Module):
         if self.recon_weight > 0:
             clean_hat = xt - alpha_bar * predicted_ecg - beta_bar * predicted_gaussian
             recon_loss = self._loss_elementwise(clean_hat, clean)
-            loss = loss + self.recon_weight * recon_loss
+            loss = loss + aux_ramp * self.recon_weight * recon_loss
+        else:
+            clean_hat = None
+
+        if self.highfreq_weight > 0:
+            if clean_hat is None:
+                clean_hat = xt - alpha_bar * predicted_ecg - beta_bar * predicted_gaussian
+            clean_high = clean - self._multi_scale_lowpass(clean)
+            clean_hat_high = clean_hat - self._multi_scale_lowpass(clean_hat)
+            highfreq_loss = self._loss_elementwise(clean_hat_high, clean_high)
+            loss = loss + aux_ramp * self.highfreq_weight * highfreq_loss
 
         if self.lowfreq_weight > 0:
-            predicted_low = self._smooth_1d(predicted_ecg, self.lowfreq_kernel_size)
-            target_low = self._smooth_1d(ecg_noise, self.lowfreq_kernel_size)
-            lowfreq_loss = self._loss_elementwise(predicted_low, target_low)
-            loss = loss + self.lowfreq_weight * lowfreq_loss
+            lowfreq_loss = 0.0
+            for kernel_size in self.lowfreq_kernel_sizes:
+                predicted_low = self._smooth_1d(predicted_ecg, kernel_size)
+                target_low = self._smooth_1d(ecg_noise, kernel_size)
+                lowfreq_loss = lowfreq_loss + self._loss_elementwise(predicted_low, target_low)
+            loss = loss + aux_ramp * self.lowfreq_weight * (lowfreq_loss / max(len(self.lowfreq_kernel_sizes), 1))
+
+        if self.baseline_spectrum_weight > 0:
+            spectrum_loss = self._baseline_spectrum_loss(predicted_ecg, ecg_noise)
+            loss = loss + aux_ramp * self.baseline_spectrum_weight * spectrum_loss
 
         if self.baseline_smooth_weight > 0 and predicted_ecg.shape[-1] > 2:
             predicted_curvature = predicted_ecg[..., 2:] - 2.0 * predicted_ecg[..., 1:-1] + predicted_ecg[..., :-2]
             target_curvature = ecg_noise[..., 2:] - 2.0 * ecg_noise[..., 1:-1] + ecg_noise[..., :-2]
             smooth_loss = self._loss_elementwise(predicted_curvature, target_curvature)
-            loss = loss + self.baseline_smooth_weight * F.pad(smooth_loss, (1, 1))
+            loss = loss + aux_ramp * self.baseline_smooth_weight * F.pad(smooth_loss, (1, 1))
 
         if self.no_gaussian_weight > 0:
             xt_no_gaussian = clean + alpha_bar * ecg_noise
@@ -707,7 +958,7 @@ class EDDMFlowMatchingDenoiser(nn.Module):
             clean_hat_ng = xt_no_gaussian - alpha_bar * predicted_ecg_ng
             no_gaussian_loss = self._loss_elementwise(predicted_ecg_ng, ecg_noise)
             no_gaussian_recon = self._loss_elementwise(clean_hat_ng, clean)
-            loss = loss + self.no_gaussian_weight * (no_gaussian_loss + self.recon_weight * no_gaussian_recon)
+            loss = loss + aux_ramp * self.no_gaussian_weight * (no_gaussian_loss + self.recon_weight * no_gaussian_recon)
 
         if self.endpoint_weight > 0:
             endpoint_t = torch.full((batch_size,), self.timesteps - 1, device=device, dtype=torch.long)
@@ -715,14 +966,32 @@ class EDDMFlowMatchingDenoiser(nn.Module):
             endpoint_clean_hat = noisy - predicted_endpoint_ecg
             endpoint_loss = self._loss_elementwise(predicted_endpoint_ecg, ecg_noise)
             endpoint_recon = self._loss_elementwise(endpoint_clean_hat, clean)
-            endpoint_low = self._loss_elementwise(
-                self._smooth_1d(predicted_endpoint_ecg, self.lowfreq_kernel_size),
-                self._smooth_1d(ecg_noise, self.lowfreq_kernel_size),
+            endpoint_high = self._loss_elementwise(
+                endpoint_clean_hat - self._multi_scale_lowpass(endpoint_clean_hat),
+                clean - self._multi_scale_lowpass(clean),
             )
-            loss = loss + self.endpoint_weight * (
+            endpoint_low = self._loss_elementwise(
+                self._multi_scale_lowpass(predicted_endpoint_ecg),
+                self._multi_scale_lowpass(ecg_noise),
+            )
+            endpoint_spectrum = self._baseline_spectrum_loss(predicted_endpoint_ecg, ecg_noise)
+            loss = loss + aux_ramp * self.endpoint_weight * (
                 endpoint_loss
                 + self.recon_weight * endpoint_recon
+                + self.highfreq_weight * endpoint_high
                 + self.lowfreq_weight * endpoint_low
+                + self.baseline_spectrum_weight * endpoint_spectrum
+            )
+
+        if self.antithetic_weight > 0:
+            xt_anti = clean + alpha_bar * ecg_noise - beta_bar * gaussian_noise
+            predicted_ecg_anti, predicted_gaussian_anti = self._predict_components(xt_anti, noisy, t)
+            anti_ecg = self._loss_elementwise(predicted_ecg_anti, ecg_noise)
+            anti_gaussian = self._loss_elementwise(predicted_gaussian_anti, -gaussian_noise)
+            anti_consistency = self._loss_elementwise(predicted_ecg_anti, predicted_ecg.detach())
+            loss = loss + aux_ramp * self.antithetic_weight * (
+                self.antithetic_ecg_weight * (anti_ecg + anti_consistency)
+                + self.antithetic_gaussian_weight * anti_gaussian
             )
 
         if valid_mask is not None:
@@ -731,3 +1000,30 @@ class EDDMFlowMatchingDenoiser(nn.Module):
                 valid_mask = valid_mask.unsqueeze(1)
             return (loss * valid_mask).sum() / valid_mask.sum().clamp_min(1.0)
         return loss.mean()
+
+
+@register_model("eddm_flow_matching_mamba")
+class EDDMFlowMatchingMambaDenoiser(EDDMFlowMatchingDenoiser):
+    """EDDM-flow-matching variant with a gated Mamba bottleneck.
+
+    Intended for the QTDB+NSTDB baseline-wander setting where the shared
+    dual-output UNet keeps complexity below EDDM-1, while one lightweight
+    Mamba block adds long-range sequence modeling inspired by MECG-E.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("shared_backbone", True)
+        kwargs.setdefault("timesteps", 24)
+        kwargs.setdefault("sampler", "heun")
+        kwargs.setdefault("mamba_layers", 1)
+        kwargs.setdefault("mamba_expand", 2)
+        kwargs.setdefault("mamba_gate_init", 0.08)
+        kwargs.setdefault("bottleneck_dilated_conv", True)
+        kwargs.setdefault("bottleneck_dilated_gate_init", 0.12)
+        kwargs.setdefault("coefficient_embedding", "rbf_kan")
+        kwargs.setdefault("coefficient_basis_count", 16)
+        kwargs.setdefault("antithetic_weight", 0.25)
+        kwargs.setdefault("aux_warmup_steps", 1000)
+        kwargs.setdefault("gaussian_inference_weight", 0.0)
+        kwargs.setdefault("inference_lowpass_ecg", True)
+        super().__init__(**kwargs)
