@@ -14,8 +14,8 @@ log_model_architecture: False
 
 training:
   train_epochs: 50000
-  batch_size: 96
-  lr: 1.0e-4
+  batch_size: 64
+  lr: 5.0e-5
   optimizer: AdamW
   betas: [0.8, 0.99]
   scheduler: ReduceLROnPlateau
@@ -23,7 +23,7 @@ training:
   lr_scheduler_patience_epochs: 5
   lr_scheduler_min_delta: 1.0e-4
   min_lr: 1.0e-7
-  grad_clip_norm: 1.0
+  grad_clip_norm: 0.5
   eval_every_epochs: 1
   validation_metrics_every_epochs: 1
   save_every_epochs: 5
@@ -110,7 +110,7 @@ model:
   cfm_groups: 8
   cfm_dropout: 0.0
   cfm_dilations: [1, 2, 4, 8]
-  cfm_inference_steps: 3
+  cfm_inference_steps: 1
   cfm_use_adaptive_gate: true
   cfm_gate_hidden: 64
   cfm_clean_delta_budget: 0.30
@@ -122,8 +122,8 @@ model:
   cfm_bridge_noise_scale: 0.02
   cfm_refine_gate_init: 0.08
   cfm_refine_gate_max: 0.30
-  cfm_baseline_gate_init: 0.22
-  cfm_baseline_gate_max: 0.85
+  cfm_baseline_gate_init: 0.16
+  cfm_baseline_gate_max: 0.50
   cfm_consistency_blend_init: 0.30
   cfm_consistency_blend_max: 0.65
   cfm_stft_configs:
@@ -131,7 +131,7 @@ model:
     - [64, 8, 64]
     - [128, 16, 128]
   lambda_cfm: 0.10
-  lambda_cfm_baseline: 0.40
+  lambda_cfm_baseline: 0.15
   lambda_cfm_recon: 0.30
   lambda_cfm_stft: 0.03
   lambda_cfm_lf: 0.05
@@ -144,6 +144,6 @@ model:
   cfm_unet_pool_scales: [3, 5, 9, 15]
   cfm_unet_attention_heads: 4
   cfm_unet_aux_channels: 2
-  lambda_ecg_noise_aux: 0.35
-  lambda_gaussian_noise_aux: 0.10
+  lambda_ecg_noise_aux: 0.10
+  lambda_gaussian_noise_aux: 0.0
   gaussian_aux_scale: 0.2

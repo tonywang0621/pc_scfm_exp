@@ -491,9 +491,19 @@ def train():
             for train_batch in train_loader:
                 optimizer.zero_grad()
                 train_loss = model.compute_loss(train_batch, device)
+                if not torch.isfinite(train_loss):
+                    raise FloatingPointError(
+                        f"Non-finite training loss at step {step + 1}: {train_loss.item()}. "
+                        "Lower the learning rate or loss weights before rerunning this experiment."
+                    )
                 train_loss.backward()
                 if grad_clip_norm is not None:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_norm)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_norm)
+                    if not torch.isfinite(grad_norm):
+                        raise FloatingPointError(
+                            f"Non-finite gradient norm at step {step + 1}: {grad_norm.item()}. "
+                            "The current model/loss recipe is numerically unstable on this batch."
+                        )
                 optimizer.step()
 
                 running_train_loss += train_loss.item()
@@ -523,6 +533,11 @@ def train():
                             noisy = val_batch[0].to(device)
                             clean = val_batch[1].to(device)
                             pred = model(noisy)
+                            if not torch.isfinite(pred).all():
+                                raise FloatingPointError(
+                                    f"Non-finite validation prediction at step {current_step}. "
+                                    "The checkpoint would produce NaN/Inf reconstruction metrics."
+                                )
                             pred_c = pred - pred.mean(dim=-1, keepdim=True)
                             clean_c = clean - clean.mean(dim=-1, keepdim=True)
                             pcc = (pred_c * clean_c).sum(dim=-1) / (
@@ -539,7 +554,12 @@ def train():
                     if loss_due:
                         avg_val_loss = 0
                         for val_batch in val_loader:
-                            avg_val_loss += model.compute_loss(val_batch, device).item()
+                            val_loss = model.compute_loss(val_batch, device)
+                            if not torch.isfinite(val_loss):
+                                raise FloatingPointError(
+                                    f"Non-finite validation loss at step {current_step}: {val_loss.item()}."
+                                )
+                            avg_val_loss += val_loss.item()
                         avg_val_loss /= len(val_loader)
                     if metrics_due:
                         fs = args.dataset.get("resample_hz", args.model.get("sampling_rate", 250))
