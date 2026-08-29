@@ -1501,6 +1501,13 @@ class MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser(ECGDenoi
         )
 
 
+@register_model("mambattention_dualpath_dapp_cfm_unet_bd_ecg")
+class MambAttentionDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
+    MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+):
+    pass
+
+
 @register_model("mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg")
 class MambAttentionSTFrFTDualPathDAPPStableCFMUNetECGDenoiser(ECGDenoisingModel):
     block_cls = MambAttentionBlock
