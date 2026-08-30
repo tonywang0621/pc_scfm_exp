@@ -17,7 +17,8 @@ import sys
 sys.path.append('mamba')
 from functools import partial
 from mamba_ssm import Mamba
-from mamba_ssm.modules.mamba_simple import Mamba, Block
+from mamba_ssm.modules.mamba_simple import Mamba
+from mamba_ssm.modules.block import Block
 from mamba_ssm.models.mixer_seq_simple import _init_weights
 from mamba_ssm.ops.triton.layernorm import RMSNorm
 
@@ -461,5 +462,4 @@ class MECGE(nn.Module):
             loss_gen_all += loss_con * 0.5
         
         return loss_gen_all
-
 

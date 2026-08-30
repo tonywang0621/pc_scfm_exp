@@ -14,7 +14,7 @@ log_model_architecture: False
 
 training:
   train_epochs: 50000
-  batch_size: 96
+  batch_size: 64
   lr: 1.0e-4
   optimizer: AdamW
   betas: [0.8, 0.99]

@@ -311,7 +311,7 @@ run_train() {
       "training.num_workers=0" \
       "training.train_drop_last=true" \
       "training.val_drop_last=true" \
-      "training.test_batch_size=50" \
+      "training.test_batch_size=64" \
       "evaluation.metric_protocol=mecge_official" \
       "${resume_overrides[@]}" \
       "${EXTRA_OVERRIDES[@]}"
@@ -462,7 +462,7 @@ run_one_job() {
         --checkpoint "$(checkpoint_path "$result_model" "$model_name" "$exp_name")" \
         --pkl-file "$pkl_file" \
         --output-pkl "$result_pkl" \
-        --batch-size 50 \
+        --batch-size 64 \
         --device "$DEVICE"
     )
     write_official_metrics "$result_pkl" "$result_model" "$model_name" "$exp_name"
