@@ -20,7 +20,10 @@ from mamba_ssm import Mamba
 from mamba_ssm.modules.mamba_simple import Mamba
 from mamba_ssm.modules.block import Block
 from mamba_ssm.models.mixer_seq_simple import _init_weights
-from mamba_ssm.ops.triton.layernorm import RMSNorm
+try:
+    from mamba_ssm.ops.triton.layer_norm import RMSNorm
+except ImportError:
+    from mamba_ssm.ops.triton.layernorm import RMSNorm
 
 
 def get_padding(kernel_size, dilation=1):
@@ -462,4 +465,3 @@ class MECGE(nn.Module):
             loss_gen_all += loss_con * 0.5
         
         return loss_gen_all
-
