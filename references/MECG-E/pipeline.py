@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import sys
+import yaml
 from torch.utils.data import DataLoader, Subset, ConcatDataset, TensorDataset
 
 from sklearn.model_selection import train_test_split
@@ -58,6 +59,36 @@ def compute_training_loss(model, clean_batch, noisy_batch, device, is_project_mo
     if is_project_model and hasattr(model, "compute_loss"):
         return model.compute_loss((noisy_batch, clean_batch), device)
     return model(clean_batch, noisy_batch)
+
+
+def as_nt(array):
+    array = np.asarray(array, dtype=np.float32)
+    if array.ndim == 3 and array.shape[1] == 1:
+        array = np.squeeze(array, axis=1)
+    elif array.ndim == 3 and array.shape[-1] == 1:
+        array = np.squeeze(array, axis=-1)
+    if array.ndim != 2:
+        raise ValueError(f"Expected [N, T], [N, 1, T], or [N, T, 1], got {array.shape}.")
+    return array
+
+
+def validation_metric_summary(clean, restored):
+    clean = as_nt(clean)
+    restored = as_nt(restored)
+    diff = restored - clean
+    ssd = np.sum(diff ** 2, axis=-1)
+    mad = np.max(np.abs(diff), axis=-1)
+    prd_den = np.sum((restored - np.mean(clean)) ** 2, axis=-1)
+    prd = np.sqrt(ssd / (prd_den + 1.0e-10)) * 100.0
+    cossim = np.sum(clean * restored, axis=-1) / (
+        np.linalg.norm(clean, axis=-1) * np.linalg.norm(restored, axis=-1) + 1.0e-10
+    )
+    return {
+        "SSD": float(np.nanmean(ssd)),
+        "MAD": float(np.nanmean(mad)),
+        "PRD": float(np.nanmean(prd)),
+        "CosSim": float(np.nanmean(cossim)),
+    }
 
 
 def build_optimizer(model, config):
@@ -121,7 +152,7 @@ def _resume_checkpoint_path(experiment, n_type, nv, default_path):
     return default_path
 
 
-def _save_training_state(path, model, optimizer, scheduler, epoch_no, best_valid_loss, config):
+def _save_training_state(path, model, optimizer, scheduler, epoch_no, best_valid_loss, config, val_metric_history):
     torch.save(
         {
             "model_state_dict": model.state_dict(),
@@ -130,6 +161,7 @@ def _save_training_state(path, model, optimizer, scheduler, epoch_no, best_valid
             "epoch": epoch_no,
             "best_valid_loss": best_valid_loss,
             "patience_counter": config["train"].get("patience_counter", 0),
+            "val_metric_history": val_metric_history,
             "config": config,
         },
         path,
@@ -143,6 +175,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
     os.makedirs(os.path.dirname(model_filepath), exist_ok=True)
     model_last_filepath = _checkpoint_sidecar_path(model_filepath, 'model_last.pt')
     training_state_filepath = _checkpoint_sidecar_path(model_filepath, 'training_state.pt')
+    validation_metrics_filepath = _checkpoint_sidecar_path(model_filepath, 'validation_metrics.yaml')
     [X_train, y_train, X_test, y_test] = Dataset
 
     X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, random_state=1)
@@ -192,6 +225,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
     patience = int(patience) if early_stopping_enabled else 0
     min_delta = float(config['train'].get('early_stopping_min_delta', 0.0))
     patience_counter = 0
+    val_metric_history = []
     resume = os.environ.get("MECGE_RESUME", "0") == "1"
     if resume:
         resume_checkpoint = _resume_checkpoint_path(experiment, n_type, nv, training_state_filepath)
@@ -204,10 +238,11 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
             lr_scheduler.load_state_dict(state["scheduler_state_dict"])
         best_valid_loss = state["best_valid_loss"]
         patience_counter = int(state.get("patience_counter", 0))
+        val_metric_history = list(state.get("val_metric_history", []))
         start_epoch = int(state["epoch"]) + 1
         print(f"Resumed MECG-E training from {resume_checkpoint} at epoch {start_epoch}.")
     else:
-        for stale_path in [model_filepath, model_last_filepath, training_state_filepath]:
+        for stale_path in [model_filepath, model_last_filepath, training_state_filepath, validation_metrics_filepath]:
             if os.path.exists(stale_path):
                 os.remove(stale_path)
     
@@ -239,12 +274,17 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
         if valid_loader is not None and (epoch_no + 1) % valid_epoch_interval == 0:
             model.eval()
             avg_loss_valid = 0
+            val_clean_batches = []
+            val_pred_batches = []
             with torch.no_grad():
                 with tqdm(valid_loader) as it:
                     for batch_no, (clean_batch, noisy_batch) in enumerate(it, start=1):
                         clean_batch, noisy_batch = clean_batch.to(device), noisy_batch.to(device)
                         loss = compute_training_loss(model, clean_batch, noisy_batch, device, is_project_model)
                         avg_loss_valid += loss.item()
+                        pred_batch = model.denoising(noisy_batch) if hasattr(model, "denoising") else model(noisy_batch)
+                        val_clean_batches.append(clean_batch.detach().cpu().numpy())
+                        val_pred_batches.append(pred_batch.detach().cpu().numpy())
                         it.set_postfix(
                             ordered_dict={
                                 "valid_avg_epoch_loss": avg_loss_valid / batch_no,
@@ -256,18 +296,34 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                 tb_writer.add_scalar('val_loss', avg_loss_valid / batch_no, epoch_no)
             
             current_valid_loss = avg_loss_valid / batch_no
+            current_step = (epoch_no + 1) * len(train_loader)
+            val_metrics = validation_metric_summary(
+                np.concatenate(val_clean_batches, axis=0),
+                np.concatenate(val_pred_batches, axis=0),
+            )
+            improved = False
             if best_valid_loss > current_valid_loss + min_delta:
                 best_valid_loss = current_valid_loss
                 patience_counter = 0
-                print("\n best loss is updated to ",current_valid_loss,"at", epoch_no,)
+                improved = True
+                print("\n best loss is updated to ",current_valid_loss,"at", epoch_no + 1,)
                 torch.save(model.state_dict(), model_filepath)
             elif early_stopping_enabled:
                 patience_counter += 1
                 print(f"No validation loss improvement. Patience: {patience_counter}/{patience}")
             config["train"]["patience_counter"] = patience_counter
+            val_record = {
+                "epoch": int(epoch_no + 1),
+                "step": int(current_step),
+                "val_loss": float(current_valid_loss),
+                **val_metrics,
+            }
+            val_metric_history.append(val_record)
+            with open(validation_metrics_filepath, "w", encoding="utf-8") as handle:
+                yaml.safe_dump(val_metric_history, handle, sort_keys=False)
             step_scheduler(lr_scheduler, current_valid_loss)
             if early_stopping_enabled and patience_counter >= patience:
-                print(f"Early stopping triggered at epoch {epoch_no}.")
+                print(f"Early stopping triggered at epoch {epoch_no + 1}.")
                 torch.save(model.state_dict(), model_last_filepath)
                 _save_training_state(
                     training_state_filepath,
@@ -277,6 +333,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                     epoch_no,
                     best_valid_loss,
                     config,
+                    val_metric_history,
                 )
                 break
         torch.save(model.state_dict(), model_last_filepath)
@@ -288,6 +345,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
             epoch_no,
             best_valid_loss,
             config,
+            val_metric_history,
         )
 
 
