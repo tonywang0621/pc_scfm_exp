@@ -15,6 +15,7 @@ from utils_ecg import (
     maximum_absolute_distance,
     nanmean_or_nan,
     prd,
+    prd_mecge_official,
     qrs_amplitude_error,
     r_peak_timing_error_ms,
     rr_interval_mae_ms,
@@ -49,6 +50,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--device", default=None)
     parser.add_argument("--low-frequency-high-hz", type=float, default=None)
+    parser.add_argument("--metric-protocol", choices=["default", "mecge_official"], default=None)
     return parser.parse_args()
 
 
@@ -116,7 +118,7 @@ def load_model_checkpoint(model, checkpoint_path, device):
         model.load_state_dict(checkpoint)
 
 
-def metric_rows(noisy, restored, clean, fs, low_freq_hz, eps, record_ids=None):
+def metric_rows(noisy, restored, clean, fs, low_freq_hz, eps, record_ids=None, metric_protocol="default"):
     noisy_2d = np.squeeze(noisy, axis=1)
     restored_2d = np.squeeze(restored, axis=1)
     lf_reduction = low_frequency_power_reduction(
@@ -144,10 +146,11 @@ def metric_rows(noisy, restored, clean, fs, low_freq_hz, eps, record_ids=None):
         return rows, summary, False
 
     clean_2d = np.squeeze(clean, axis=1)
+    prd_fn = prd_mecge_official if metric_protocol == "mecge_official" else prd
     metric_values = {
         "SSD": ssd(clean_2d, restored_2d),
         "MAD": maximum_absolute_distance(clean_2d, restored_2d),
-        "PRD": prd(clean_2d, restored_2d, eps=eps),
+        "PRD": prd_fn(clean_2d, restored_2d, eps=eps),
         "CosSim": cosine_similarity(clean_2d, restored_2d, eps=eps),
         "Output_SNR_dB": snr_db(clean_2d, restored_2d, eps=eps),
         "SNR_Improvement_dB": snr_improvement_db(clean_2d, noisy_2d, restored_2d, eps=eps),
@@ -261,7 +264,21 @@ def main():
         else cfg.get("evaluation", {}).get("low_frequency_high_hz", 0.5)
     )
     eps = cfg.dataset.get("eps", 1e-10)
-    rows, summary, has_reference = metric_rows(noisy, restored, clean, fs, low_freq_hz, eps, record_ids)
+    metric_protocol = (
+        args.metric_protocol
+        if args.metric_protocol is not None
+        else cfg.get("evaluation", {}).get("metric_protocol", "default")
+    )
+    rows, summary, has_reference = metric_rows(
+        noisy,
+        restored,
+        clean,
+        fs,
+        low_freq_hz,
+        eps,
+        record_ids,
+        metric_protocol=metric_protocol,
+    )
     write_outputs(output_dir, noisy, restored, clean, rows, summary, has_reference, restored_shots)
     print_summary(summary, has_reference)
     print(f"saved restored ECG and metric tables to: {output_dir}")

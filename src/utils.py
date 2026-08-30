@@ -19,6 +19,7 @@ from utils_ecg import (
     maximum_absolute_distance,
     nanmean_or_nan,
     prd,
+    prd_mecge_official,
     qrs_amplitude_error,
     r_peak_timing_error_ms,
     rr_interval_mae_ms,
@@ -124,19 +125,28 @@ def plot_loss_curves(train_losses, val_losses, eval_every, results_dir, val_pccs
     return loss_curves_dir
 
 
-def reconstruction_metrics_from_arrays(noisy, clean, pred, fs=250, low_freq_hz=0.5, eps=1e-10):
-    summary = reconstruction_metric_summary_from_arrays(noisy, clean, pred, fs=fs, low_freq_hz=low_freq_hz, eps=eps)
+def reconstruction_metrics_from_arrays(noisy, clean, pred, fs=250, low_freq_hz=0.5, eps=1e-10, metric_protocol="default"):
+    summary = reconstruction_metric_summary_from_arrays(
+        noisy,
+        clean,
+        pred,
+        fs=fs,
+        low_freq_hz=low_freq_hz,
+        eps=eps,
+        metric_protocol=metric_protocol,
+    )
     return {key: stats["mean"] for key, stats in summary.items()}
 
 
-def reconstruction_metric_summary_from_arrays(noisy, clean, pred, fs=250, low_freq_hz=0.5, eps=1e-10):
+def reconstruction_metric_summary_from_arrays(noisy, clean, pred, fs=250, low_freq_hz=0.5, eps=1e-10, metric_protocol="default"):
     noisy = np.squeeze(np.asarray(noisy), axis=1)
     clean = np.squeeze(np.asarray(clean), axis=1)
     pred = np.squeeze(np.asarray(pred), axis=1)
+    prd_fn = prd_mecge_official if metric_protocol == "mecge_official" else prd
     metric_values = {
         "SSD": ssd(clean, pred),
         "MAD": maximum_absolute_distance(clean, pred),
-        "PRD": prd(clean, pred, eps=eps),
+        "PRD": prd_fn(clean, pred, eps=eps),
         "CosSim": cosine_similarity(clean, pred, eps=eps),
         "Output_SNR_dB": snr_db(clean, pred, eps=eps),
         "SNR_Improvement_dB": snr_improvement_db(clean, noisy, pred, eps=eps),
@@ -296,7 +306,7 @@ def get_reconstruction_metrics(model, test_loader, device, fs=250, low_freq_hz=0
     return {key: stats["mean"] for key, stats in summary.items()}
 
 
-def get_reconstruction_metric_summary(model, test_loader, device, fs=250, low_freq_hz=0.5, eps=1e-10):
+def get_reconstruction_metric_summary(model, test_loader, device, fs=250, low_freq_hz=0.5, eps=1e-10, metric_protocol="default"):
     noisy_all, clean_all, pred_all = [], [], []
     model.eval()
     with torch.no_grad():
@@ -314,6 +324,7 @@ def get_reconstruction_metric_summary(model, test_loader, device, fs=250, low_fr
         fs=fs,
         low_freq_hz=low_freq_hz,
         eps=eps,
+        metric_protocol=metric_protocol,
     )
 
 

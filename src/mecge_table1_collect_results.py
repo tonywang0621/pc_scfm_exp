@@ -53,7 +53,10 @@ def parse_result_name(name):
 
 def collect_table1(run_root, noise_version):
     rows = []
-    for metrics_path in run_root.glob(f"*/results/*__qtdb_train_qtdb_test__{noise_version}__seed*/**/metrics_qtdb_pkl_test.yaml"):
+    nv_pattern = "nv*"
+    if noise_version != "all":
+        nv_pattern = noise_version
+    for metrics_path in run_root.glob(f"*/results/*__qtdb_train_qtdb_test__{nv_pattern}__seed*/**/metrics_qtdb_pkl_test.yaml"):
         result_name = None
         for parent in metrics_path.parents:
             if "__qtdb_train_qtdb_test__" in parent.name:
@@ -74,7 +77,10 @@ def collect_table1(run_root, noise_version):
 
 def collect_robustness(run_root, noise_version):
     rows = []
-    for metrics_path in run_root.glob(f"*/controlled_tests/*__qtdb_robustness_alpha_*__{noise_version}__seed*/metrics_summary.csv"):
+    nv_pattern = "nv*"
+    if noise_version != "all":
+        nv_pattern = noise_version
+    for metrics_path in run_root.glob(f"*/controlled_tests/*__qtdb_robustness_alpha_*__{nv_pattern}__seed*/metrics_summary.csv"):
         result_name = metrics_path.parent.name
         parsed = parse_result_name(result_name)
         alpha = parsed["dataset_protocol"].replace("qtdb_robustness_alpha_", "")

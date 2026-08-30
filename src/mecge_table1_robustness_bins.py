@@ -78,9 +78,9 @@ def main():
     all_rows = []
     for low, high in zip(BIN_EDGES[:-1], BIN_EDGES[1:]):
         if high == BIN_EDGES[-1]:
-            mask = (rnd_test >= low) & (rnd_test <= high)
+            mask = rnd_test > low
         else:
-            mask = (rnd_test >= low) & (rnd_test < high)
+            mask = (rnd_test > low) & (rnd_test < high)
         indices = np.where(mask)[0]
         condition_value = f"{low}-{high}"
         metric_stats = {}

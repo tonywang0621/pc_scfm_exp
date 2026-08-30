@@ -3,25 +3,27 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT_DIR/src"
+OFFICIAL_MECGE_DIR="$ROOT_DIR/references/MECG-E"
 DATA_ROOT="$ROOT_DIR/data/mecge_table1_repro"
 RUN_ROOT="$ROOT_DIR/runs/mecge_table1_repro"
 
-NV="${NV:-1}"
+NV="${NV:-all}"
 DEVICE="${DEVICE:-cuda:0}"
-PKL_FILE="${PKL_FILE:-$DATA_ROOT/raw/dataset_bw_nv${NV}.pkl}"
+PKL_FILE="${PKL_FILE:-}"
 QTDB_RAW="${QTDB_RAW:-$DATA_ROOT/raw/QTDB}"
 NSTDB_RAW="${NSTDB_RAW:-$DATA_ROOT/raw/NSTDB}"
+RND_TEST_FILE="${RND_TEST_FILE:-$ROOT_DIR/references/MECG-E/rnd_test.npy}"
 FORCE_PREPARE_RAW="${FORCE_PREPARE_RAW:-0}"
 SKIP_TRAIN="${SKIP_TRAIN:-0}"
 SKIP_ROBUSTNESS="${SKIP_ROBUSTNESS:-0}"
 RESUME="${RESUME:-0}"
 RESUME_CHECKPOINT="${RESUME_CHECKPOINT:-}"
-SEEDS_MAIN="${SEEDS_MAIN:-42 43 44}"
-SEEDS_EDDM="${SEEDS_EDDM:-42}"
-ALPHAS="${ALPHAS:-0.2 0.6 1.0 1.5 2.0}"
+SEEDS_MAIN="${SEEDS_MAIN:-3407}"
+SEEDS_EDDM="${SEEDS_EDDM:-3407}"
 TARGET_MODEL="${TARGET_MODEL:-all}"
 TARGET_SEED="${TARGET_SEED:-}"
 EXTRA_OVERRIDES=()
+OFFICIAL_MECGE_RAN=0
 
 usage() {
   cat <<'USAGE'
@@ -29,15 +31,17 @@ Usage:
   bash scripts/run_mecge_table1_repro.sh [options]
 
 Options:
-  --nv N                MECG-E noise version. Default: 1
-  --pkl-file PATH       Official MECG-E dataset_bw_nv*.pkl path.
+  --nv N|all            MECG-E noise version. Default: all (official nv1 and nv2).
+  --pkl-file PATH       Official MECG-E dataset_bw_nv*.pkl path. With --nv all,
+                        use a path containing {nv}, or omit to use data/mecge_table1_repro/raw.
   --qtdb-raw PATH        Raw QTDB WFDB directory for 100% DeepFilter/MECG-E prep.
   --nstdb-raw PATH       Raw NSTDB WFDB directory for 100% DeepFilter/MECG-E prep.
+  --rnd-test PATH        Official MECG-E rnd_test.npy for robustness bins.
   --prepare-raw          Recreate dataset_bw_nv*.pkl from raw QTDB/NSTDB before training.
   --device DEVICE       Training/inference device. Default: cuda:0
   --model NAME          One of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd,
                         stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
-  --seed N              Run one seed only. Required for a single model/seed job.
+  --seed N              Run one seed only. Default for single-model jobs: 3407.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
   --skip-robustness     Only run train + QTDB pkl test.
   --resume              Resume training from training_state.pt for the selected run.
@@ -46,25 +50,26 @@ Options:
   key=value             Extra OmegaConf override passed to train_supervised.py.
 
 Environment overrides:
-  SEEDS_MAIN="42 43 44"
-  SEEDS_EDDM="42"
+  SEEDS_MAIN="3407"
+  SEEDS_EDDM="3407"
+  RND_TEST_FILE="references/MECG-E/rnd_test.npy"
   QTDB_RAW="data/mecge_table1_repro/raw/QTDB"
   NSTDB_RAW="data/mecge_table1_repro/raw/NSTDB"
 
 Single-job examples:
-  bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model mecge --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model mambattention --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model stable --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model eddm_fm_mamba --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 42 --nv 1 --device cuda:0
-  bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 42 --nv 1 --resume --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model main --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mecge --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mambattention --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model stable --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model eddm_fm_mamba --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 3407 --nv 1 --resume --device cuda:0
 
 100% DeepFilter/MECG-E raw-prep example:
-  bash scripts/run_mecge_table1_repro.sh --model main --seed 42 --nv 1 --prepare-raw --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model main --seed 3407 --nv all --prepare-raw --device cuda:0
 USAGE
 }
 
@@ -72,7 +77,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --nv)
       NV="$2"
-      PKL_FILE="$DATA_ROOT/raw/dataset_bw_nv${NV}.pkl"
       shift 2
       ;;
     --pkl-file)
@@ -85,6 +89,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --nstdb-raw)
       NSTDB_RAW="$2"
+      shift 2
+      ;;
+    --rnd-test)
+      RND_TEST_FILE="$2"
       shift 2
       ;;
     --prepare-raw)
@@ -136,7 +144,62 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$RND_TEST_FILE" != /* ]]; then
+  RND_TEST_FILE="$ROOT_DIR/$RND_TEST_FILE"
+fi
+
 mkdir -p "$DATA_ROOT/raw" "$DATA_ROOT/controlled_tests" "$RUN_ROOT/analysis"
+
+validate_noise_version() {
+  case "$1" in
+    1|2)
+      return 0
+      ;;
+    *)
+      echo "Unsupported --nv '$1'. Expected 1, 2, or all." >&2
+      exit 2
+      ;;
+  esac
+}
+
+noise_versions() {
+  case "$NV" in
+    all)
+      printf '%s\n' 1 2
+      ;;
+    1|2)
+      printf '%s\n' "$NV"
+      ;;
+    *)
+      echo "Unsupported --nv '$NV'. Expected 1, 2, or all." >&2
+      exit 2
+      ;;
+  esac
+}
+
+resolve_pkl_file() {
+  local nv="$1"
+  if [[ -n "$PKL_FILE" ]]; then
+    if [[ "$PKL_FILE" == *"{nv}"* ]]; then
+      printf '%s\n' "${PKL_FILE//\{nv\}/$nv}"
+    else
+      if [[ "$NV" == "all" ]]; then
+        echo "--pkl-file with --nv all must contain '{nv}', or omit --pkl-file." >&2
+        exit 2
+      fi
+      printf '%s\n' "$PKL_FILE"
+    fi
+  else
+    printf '%s\n' "$DATA_ROOT/raw/dataset_bw_nv${nv}.pkl"
+  fi
+}
+
+official_result_pkl() {
+  local result_model="$1"
+  local nv="$2"
+  local seed="$3"
+  printf '%s\n' "$RUN_ROOT/official_results/${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}.pkl"
+}
 
 normalize_model() {
   case "$1" in
@@ -178,12 +241,13 @@ normalize_model() {
 }
 
 prepare_raw_if_needed() {
-  local rnd_test="$DATA_ROOT/raw/rnd_test_nv${NV}.npy"
-  if [[ "$FORCE_PREPARE_RAW" != "1" && -f "$PKL_FILE" && ( "$SKIP_ROBUSTNESS" == "1" || -f "$rnd_test" ) ]]; then
+  local nv="$1"
+  local pkl_file="$2"
+  if [[ "$FORCE_PREPARE_RAW" != "1" && -f "$pkl_file" ]]; then
     return 0
   fi
   if [[ -z "$QTDB_RAW" || -z "$NSTDB_RAW" ]]; then
-    echo "Missing MECG-E pkl file: $PKL_FILE" >&2
+    echo "Missing MECG-E pkl file: $pkl_file" >&2
     echo "Provide --pkl-file, or provide --qtdb-raw and --nstdb-raw with --prepare-raw." >&2
     exit 1
   fi
@@ -193,7 +257,7 @@ prepare_raw_if_needed() {
       --qtdb-root "$QTDB_RAW" \
       --nstdb-root "$NSTDB_RAW" \
       --output-dir "$DATA_ROOT/raw" \
-      --noise-version "$NV" \
+      --noise-version "$nv" \
       --overwrite
   )
 }
@@ -206,6 +270,7 @@ run_train() {
   local model_name="$3"
   local seed="$4"
   local exp_name="$5"
+  local pkl_file="$6"
 
   if [[ "$SKIP_TRAIN" == "1" ]]; then
     return 0
@@ -225,11 +290,29 @@ run_train() {
       "checkpoint_dir=\${root_dir}/checkpoint" \
       "results_dir=\${root_dir}/results" \
       "log_dir=\${root_dir}/log" \
-      "dataset.pkl_file=$PKL_FILE" \
+      "dataset.pkl_file=$pkl_file" \
       "dataset.test_label=qtdb_pkl_test" \
+      "dataset.pkl_validation_ratio=0.3" \
+      "dataset.pkl_validation_random_state=1" \
       "exp_name=$exp_name" \
       "seed=$seed" \
       "device=$DEVICE" \
+      "training.train_epochs=30" \
+      "training.optimizer=AdamW" \
+      "training.betas=[0.8,0.99]" \
+      "training.weight_decay=0.01" \
+      "training.scheduler=ExponentialLR" \
+      "training.gamma=0.99" \
+      "training.grad_clip_norm=null" \
+      "training.eval_every_epochs=1" \
+      "training.validation_metrics_every_epochs=1" \
+      "training.early_stopping_patience_epochs=null" \
+      "training.selection_metric=val_loss" \
+      "training.num_workers=0" \
+      "training.train_drop_last=true" \
+      "training.val_drop_last=true" \
+      "training.test_batch_size=50" \
+      "evaluation.metric_protocol=mecge_official" \
       "${resume_overrides[@]}" \
       "${EXTRA_OVERRIDES[@]}"
   )
@@ -242,6 +325,21 @@ checkpoint_path() {
   printf '%s\n' "$RUN_ROOT/$result_model/checkpoint/$exp_name/$model_name/best_model.pt"
 }
 
+write_official_metrics() {
+  local result_pkl="$1"
+  local result_model="$2"
+  local model_name="$3"
+  local exp_name="$4"
+  local eval_dir="$RUN_ROOT/$result_model/results/$exp_name/$model_name/best_loss"
+
+  (
+    cd "$APP_DIR"
+    python3 mecge_table1_official_result_metrics.py \
+      --result-pkl "$result_pkl" \
+      --output-dir "$eval_dir"
+  )
+}
+
 alpha_label() {
   printf '%s\n' "$1" | sed 's/\./p/g; s/-/m/g'
 }
@@ -252,37 +350,95 @@ run_exp2_inference() {
   local model_name="$3"
   local seed="$4"
   local exp_name_train="$5"
-  local ckpt
-  ckpt="$(checkpoint_path "$result_model" "$model_name" "$exp_name_train")"
+  local nv="$6"
+  local pkl_file="$7"
+  local metrics_per_window="$RUN_ROOT/$result_model/results/$exp_name_train/$model_name/best_loss/metrics_per_window.csv"
 
   if [[ "$SKIP_ROBUSTNESS" == "1" ]]; then
     return 0
   fi
-  if [[ ! -f "$ckpt" ]]; then
-    echo "Missing checkpoint for robustness: $ckpt" >&2
-    exit 1
-  fi
-  local metrics_per_window="$RUN_ROOT/$result_model/results/$exp_name_train/$model_name/best_loss/metrics_per_window.csv"
-  local rnd_test="$DATA_ROOT/raw/rnd_test_nv${NV}.npy"
   if [[ ! -f "$metrics_per_window" ]]; then
-    echo "Missing QTDB test per-window metrics for robustness bins: $metrics_per_window" >&2
+    echo "Missing official-style per-window metrics for robustness: $metrics_per_window" >&2
     exit 1
   fi
-  if [[ ! -f "$rnd_test" ]]; then
-    echo "Missing rnd_test for 100% MECG-E/DeepFilter robustness bins: $rnd_test" >&2
-    echo "Run with --prepare-raw, or provide pkl generated by mecge_table1_prepare_deepfilter.py." >&2
+  if [[ ! -f "$RND_TEST_FILE" ]]; then
+    echo "Missing official MECG-E rnd_test.npy for robustness bins: $RND_TEST_FILE" >&2
+    echo "Clone khhungg/MECG-E to references/MECG-E, or pass --rnd-test PATH." >&2
     exit 1
   fi
+
   (
     cd "$APP_DIR"
     python3 mecge_table1_robustness_bins.py \
       --metrics-per-window "$metrics_per_window" \
-      --rnd-test "$rnd_test" \
+      --rnd-test "$RND_TEST_FILE" \
       --output-root "$RUN_ROOT/$result_model/controlled_tests" \
       --result-model "$result_model" \
-      --noise-version "nv${NV}" \
+      --noise-version "nv${nv}" \
       --seed "$seed"
   )
+}
+
+run_official_mecge_for_nv() {
+  local nv="$1"
+  local pkl_file="$2"
+  local seed="${TARGET_SEED:-3407}"
+  local exp_name="${MECGE_RESULT_MODEL}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
+  local official_out
+  official_out="$(official_result_pkl "$MECGE_RESULT_MODEL" "$nv" "$seed")"
+
+  if [[ ! -d "$OFFICIAL_MECGE_DIR" ]]; then
+    echo "Missing official MECG-E clone: $OFFICIAL_MECGE_DIR" >&2
+    exit 1
+  fi
+
+  if [[ "$SKIP_TRAIN" != "1" ]]; then
+    if [[ "$OFFICIAL_MECGE_RAN" != "1" ]]; then
+      local pkl_nv1
+      local pkl_nv2
+      pkl_nv1="$(resolve_pkl_file 1)"
+      pkl_nv2="$(resolve_pkl_file 2)"
+      if [[ ! -f "$pkl_nv1" || ! -f "$pkl_nv2" ]]; then
+        echo "Official MECG-E main.py runs nv1 and nv2 together; both pkl files are required." >&2
+        echo "Missing or unavailable: $pkl_nv1 / $pkl_nv2" >&2
+        exit 1
+      fi
+      mkdir -p "$OFFICIAL_MECGE_DIR/data" "$OFFICIAL_MECGE_DIR/results" "$OFFICIAL_MECGE_DIR/logs" "$OFFICIAL_MECGE_DIR/model_weight"
+      cp "$pkl_nv1" "$OFFICIAL_MECGE_DIR/data/dataset_bw_nv1.pkl"
+      cp "$pkl_nv2" "$OFFICIAL_MECGE_DIR/data/dataset_bw_nv2.pkl"
+      (
+        cd "$OFFICIAL_MECGE_DIR"
+        python3 main.py --n_type bw --config config/MECGE_phase.yaml --device "$DEVICE"
+      )
+      OFFICIAL_MECGE_RAN=1
+    fi
+  fi
+
+  local official_generated="$OFFICIAL_MECGE_DIR/results/MECGE_phase_bw_nv${nv}.pkl"
+  if [[ ! -f "$official_generated" ]]; then
+    echo "Missing official MECG-E result: $official_generated" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$official_out")"
+  cp "$official_generated" "$official_out"
+  write_official_metrics "$official_out" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "$exp_name"
+
+  if [[ "$SKIP_ROBUSTNESS" != "1" ]]; then
+    if [[ ! -f "$RND_TEST_FILE" ]]; then
+      echo "Missing official MECG-E rnd_test.npy for robustness bins: $RND_TEST_FILE" >&2
+      exit 1
+    fi
+    (
+      cd "$APP_DIR"
+      python3 mecge_table1_robustness_bins.py \
+        --metrics-per-window "$RUN_ROOT/$MECGE_RESULT_MODEL/results/$exp_name/$MECGE_MODEL_NAME/best_loss/metrics_per_window.csv" \
+        --rnd-test "$RND_TEST_FILE" \
+        --output-root "$RUN_ROOT/$MECGE_RESULT_MODEL/controlled_tests" \
+        --result-model "$MECGE_RESULT_MODEL" \
+        --noise-version "nv${nv}" \
+        --seed "$seed"
+    )
+  fi
 }
 
 run_one_job() {
@@ -290,10 +446,29 @@ run_one_job() {
   local result_model="$2"
   local model_name="$3"
   local seed="$4"
-  local exp_name="${result_model}__qtdb_train_qtdb_test__nv${NV}__seed${seed}"
-  echo "RUN job: model=$result_model seed=$seed nv=nv${NV}"
-  run_train "$config" "$result_model" "$model_name" "$seed" "$exp_name"
-  run_exp2_inference "$config" "$result_model" "$model_name" "$seed" "$exp_name"
+  local nv="$5"
+  local pkl_file="$6"
+  local exp_name="${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
+  local result_pkl
+  result_pkl="$(official_result_pkl "$result_model" "$nv" "$seed")"
+  echo "RUN job: model=$result_model seed=$seed nv=nv${nv}"
+  run_train "$config" "$result_model" "$model_name" "$seed" "$exp_name" "$pkl_file"
+
+  if [[ "$SKIP_TRAIN" != "1" ]]; then
+    (
+      cd "$APP_DIR"
+      python3 mecge_table1_export_local_result.py \
+        --config "$config" \
+        --checkpoint "$(checkpoint_path "$result_model" "$model_name" "$exp_name")" \
+        --pkl-file "$pkl_file" \
+        --output-pkl "$result_pkl" \
+        --batch-size 50 \
+        --device "$DEVICE"
+    )
+    write_official_metrics "$result_pkl" "$result_model" "$model_name" "$exp_name"
+  fi
+
+  run_exp2_inference "$config" "$result_model" "$model_name" "$seed" "$exp_name" "$nv" "$pkl_file"
 }
 
 run_model_family() {
@@ -301,12 +476,12 @@ run_model_family() {
   local result_model="$2"
   local model_name="$3"
   local seeds="$4"
+  local nv="$5"
+  local pkl_file="$6"
   for seed in $seeds; do
-    run_one_job "$config" "$result_model" "$model_name" "$seed"
+    run_one_job "$config" "$result_model" "$model_name" "$seed" "$nv" "$pkl_file"
   done
 }
-
-prepare_raw_if_needed
 
 MAIN_CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_cfm_unet_bd.yaml"
 MAIN_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_cfm_unet_bd"
@@ -336,91 +511,85 @@ EDDM_CONFIG="configs/mecge_table1_repro_eddm_1shot.yaml"
 EDDM_RESULT_MODEL="eddm_1shot"
 EDDM_MODEL_NAME="eddm"
 
-case "$TARGET_MODEL" in
-  all)
-    if [[ -n "$TARGET_SEED" ]]; then
-      echo "--seed can only be used with --model mecge, mambattention, dualpath_dapp_cfm_unet_bd, stfrft, main, stable, eddm_fm, eddm_fm_mamba, or eddm_1shot." >&2
-      exit 2
-    fi
-    run_model_family "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN"
-    run_model_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM"
-    ;;
-  main)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model main requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  mecge)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model mecge requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  mambattention)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model mambattention requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  dualpath_dapp_cfm_unet_bd)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model dualpath_dapp_cfm_unet_bd requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  stfrft)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model stfrft requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  stable)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model stable requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  eddm_fm)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model eddm_fm requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  eddm_fm_mamba)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model eddm_fm_mamba requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$TARGET_SEED"
-    ;;
-  eddm_1shot)
-    if [[ -z "$TARGET_SEED" ]]; then
-      echo "--model eddm_1shot requires --seed N for a single model/seed job." >&2
-      exit 2
-    fi
-    run_one_job "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$TARGET_SEED"
-    ;;
-esac
+run_selected_models_for_nv() {
+  local nv="$1"
+  local pkl_file="$2"
+
+  case "$TARGET_MODEL" in
+    all)
+      if [[ -n "$TARGET_SEED" ]]; then
+        echo "--seed can only be used with a single --model target." >&2
+        exit 2
+      fi
+      run_official_mecge_for_nv "$nv" "$pkl_file"
+      run_model_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM" "$nv" "$pkl_file"
+      ;;
+    main)
+      run_one_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    mecge)
+      run_official_mecge_for_nv "$nv" "$pkl_file"
+      ;;
+    mambattention)
+      run_one_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    dualpath_dapp_cfm_unet_bd)
+      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    stfrft)
+      run_one_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    stable)
+      run_one_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    eddm_fm)
+      run_one_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    eddm_fm_mamba)
+      run_one_job "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    eddm_1shot)
+      run_one_job "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+  esac
+}
+
+for nv in $(noise_versions); do
+  validate_noise_version "$nv"
+  pkl_file="$(resolve_pkl_file "$nv")"
+  prepare_raw_if_needed "$nv" "$pkl_file"
+done
+
+for nv in $(noise_versions); do
+  validate_noise_version "$nv"
+  pkl_file="$(resolve_pkl_file "$nv")"
+  run_selected_models_for_nv "$nv" "$pkl_file"
+  (
+    cd "$APP_DIR"
+    python3 mecge_table1_collect_results.py \
+      --run-root "$RUN_ROOT" \
+      --noise-version "nv${nv}" \
+      --output-dir "$RUN_ROOT/analysis"
+  )
+done
 
 (
   cd "$APP_DIR"
   python3 mecge_table1_collect_results.py \
     --run-root "$RUN_ROOT" \
-    --noise-version "nv${NV}" \
+    --noise-version all \
     --output-dir "$RUN_ROOT/analysis"
+  if [[ -f "$RND_TEST_FILE" ]]; then
+    python3 mecge_table1_collect_official_protocol.py \
+      --official-results-dir "$RUN_ROOT/official_results" \
+      --rnd-test "$RND_TEST_FILE" \
+      --output-dir "$RUN_ROOT/analysis"
+  fi
 )

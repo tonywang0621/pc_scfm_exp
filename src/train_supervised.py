@@ -326,24 +326,30 @@ def train():
     train_dataset = get_dataset(data_mode='train', **dataset_kwargs) 
     val_dataset = get_dataset(data_mode='val', **dataset_kwargs) 
     test_dataset = get_dataset(data_mode='test', **dataset_kwargs) 
+    num_workers = int(args.training.get("num_workers", 4))
+    train_drop_last = bool(args.training.get("train_drop_last", False))
+    val_drop_last = bool(args.training.get("val_drop_last", False))
+    test_batch_size = int(args.training.get("test_batch_size", args.training.batch_size))
     
     train_loader = DataLoader(
         train_dataset, 
         batch_size=args.training.batch_size, 
         shuffle=True, 
-        num_workers=4, 
+        drop_last=train_drop_last,
+        num_workers=num_workers,
     )
     val_loader = DataLoader(
         val_dataset, 
         batch_size=args.training.batch_size, 
         shuffle=False, 
-        num_workers=4, 
+        drop_last=val_drop_last,
+        num_workers=num_workers,
     )
     test_loader = DataLoader(
         test_dataset, 
-        batch_size=args.training.batch_size, 
+        batch_size=test_batch_size,
         shuffle=False, 
-        num_workers=4, 
+        num_workers=num_workers,
     )
     # print(f'data loaders sucessfully loaded')
     logger.info(f'data loaders sucessfully loaded')
@@ -571,6 +577,7 @@ def train():
                             fs=fs,
                             low_freq_hz=low_freq_hz,
                             eps=args.dataset.eps,
+                            metric_protocol=args.get("evaluation", {}).get("metric_protocol", "default"),
                         )
                         val_metric_history.append(
                             {
@@ -819,9 +826,9 @@ def train():
                 continue
             external_loader = DataLoader(
                 external_dataset,
-                batch_size=args.training.batch_size,
+                batch_size=test_batch_size,
                 shuffle=False,
-                num_workers=4,
+                num_workers=num_workers,
             )
             eval_items.append((external_name, external_dataset, external_loader))
 
@@ -836,7 +843,13 @@ def train():
 
         for eval_name, _, eval_loader in eval_items:
             metrics_summary = get_reconstruction_metric_summary(
-                model, eval_loader, device, fs=fs, low_freq_hz=low_freq_hz, eps=args.dataset.eps
+                model,
+                eval_loader,
+                device,
+                fs=fs,
+                low_freq_hz=low_freq_hz,
+                eps=args.dataset.eps,
+                metric_protocol=args.get("evaluation", {}).get("metric_protocol", "default"),
             )
             logger.info('\n')
             logger.info(separator)

@@ -1,0 +1,22 @@
+
+#type: args
+
+train:
+  epochs: 30
+  batch_size: 96
+  lr: 1.0e-4
+
+model:
+  fea: "cpx"
+  norm: False
+  fmamba: True
+  dense_channel: 32
+  compress_factor: 0.3
+  num_tscblocks: 4
+  sampling_rate: 16000
+  n_fft: 64
+  hop_size: 8
+  win_size: 64
+  beta: 2
+  loss_fn: "time+com+con"
+

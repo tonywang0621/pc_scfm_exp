@@ -21,6 +21,14 @@ def prd(clean, restored, eps=1e-10):
     return np.sqrt(numerator / (denominator + eps)) * 100.0
 
 
+def prd_mecge_official(clean, restored, eps=1e-10):
+    clean = np.asarray(clean)
+    restored = np.asarray(restored)
+    numerator = np.sum((restored - clean) ** 2, axis=-1)
+    denominator = np.sum((restored - np.mean(clean)) ** 2, axis=-1)
+    return np.sqrt(numerator / (denominator + eps)) * 100.0
+
+
 def snr_db(clean, restored, eps=1e-10):
     clean = np.asarray(clean)
     restored = np.asarray(restored)
