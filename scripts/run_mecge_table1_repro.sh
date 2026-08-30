@@ -379,13 +379,22 @@ run_exp2_inference() {
   )
 }
 
-run_official_mecge_for_nv() {
-  local nv="$1"
-  local pkl_file="$2"
-  local seed="${TARGET_SEED:-3407}"
-  local exp_name="${MECGE_RESULT_MODEL}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
+run_mecge_pipeline_job() {
+  local config="$1"
+  local result_model="$2"
+  local model_name="$3"
+  local seed="$4"
+  local nv="$5"
+  local pkl_file="$6"
+  local exp_name="${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
+  local config_path="$config"
+  local config_name
+  config_name="$(basename "$config_path" .yaml)"
+  if [[ "$config_path" != /* ]]; then
+    config_path="$APP_DIR/$config_path"
+  fi
   local official_out
-  official_out="$(official_result_pkl "$MECGE_RESULT_MODEL" "$nv" "$seed")"
+  official_out="$(official_result_pkl "$result_model" "$nv" "$seed")"
 
   if [[ ! -d "$OFFICIAL_MECGE_DIR" ]]; then
     echo "Missing official MECG-E clone: $OFFICIAL_MECGE_DIR" >&2
@@ -393,35 +402,34 @@ run_official_mecge_for_nv() {
   fi
 
   if [[ "$SKIP_TRAIN" != "1" ]]; then
-    if [[ "$OFFICIAL_MECGE_RAN" != "1" ]]; then
-      local pkl_nv1
-      local pkl_nv2
-      pkl_nv1="$(resolve_pkl_file 1)"
-      pkl_nv2="$(resolve_pkl_file 2)"
-      if [[ ! -f "$pkl_nv1" || ! -f "$pkl_nv2" ]]; then
-        echo "Official MECG-E main.py runs nv1 and nv2 together; both pkl files are required." >&2
-        echo "Missing or unavailable: $pkl_nv1 / $pkl_nv2" >&2
-        exit 1
+    mkdir -p "$OFFICIAL_MECGE_DIR/data" "$RUN_ROOT/$result_model/native_results" "$RUN_ROOT/$result_model/log"
+    cp "$pkl_file" "$OFFICIAL_MECGE_DIR/data/dataset_bw_nv${nv}.pkl"
+    (
+      cd "$OFFICIAL_MECGE_DIR"
+      export MECGE_APP_DIR="$APP_DIR"
+      export MECGE_DEVICE="$DEVICE"
+      export MECGE_MODEL_WEIGHT_TEMPLATE="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name/best_model.pt"
+      export MECGE_RESULTS_DIR="$RUN_ROOT/$result_model/native_results"
+      export MECGE_LOGS_DIR="$RUN_ROOT/$result_model/log"
+      export MECGE_RESUME="$RESUME"
+      if [[ "$model_name" != "$MECGE_MODEL_NAME" ]]; then
+        export MECGE_PROJECT_MODEL_NAME="$model_name"
       fi
-      mkdir -p "$OFFICIAL_MECGE_DIR/data" "$OFFICIAL_MECGE_DIR/results" "$OFFICIAL_MECGE_DIR/logs" "$OFFICIAL_MECGE_DIR/model_weight"
-      cp "$pkl_nv1" "$OFFICIAL_MECGE_DIR/data/dataset_bw_nv1.pkl"
-      cp "$pkl_nv2" "$OFFICIAL_MECGE_DIR/data/dataset_bw_nv2.pkl"
-      (
-        cd "$OFFICIAL_MECGE_DIR"
-        python3 main.py --n_type bw --config config/MECGE_phase.yaml --device "$DEVICE"
-      )
-      OFFICIAL_MECGE_RAN=1
-    fi
+      if [[ -n "$RESUME_CHECKPOINT" ]]; then
+        export MECGE_RESUME_CHECKPOINT="$RESUME_CHECKPOINT"
+      fi
+      python3 main.py --n_type bw --nv "$nv" --config "$config_path" --device "$DEVICE"
+    )
   fi
 
-  local official_generated="$OFFICIAL_MECGE_DIR/results/MECGE_phase_bw_nv${nv}.pkl"
+  local official_generated="$RUN_ROOT/$result_model/native_results/${config_name}_bw_nv${nv}.pkl"
   if [[ ! -f "$official_generated" ]]; then
-    echo "Missing official MECG-E result: $official_generated" >&2
+    echo "Missing MECG-E-pipeline result: $official_generated" >&2
     exit 1
   fi
   mkdir -p "$(dirname "$official_out")"
   cp "$official_generated" "$official_out"
-  write_official_metrics "$official_out" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "$exp_name"
+  write_official_metrics "$official_out" "$result_model" "$model_name" "$exp_name"
 
   if [[ "$SKIP_ROBUSTNESS" != "1" ]]; then
     if [[ ! -f "$RND_TEST_FILE" ]]; then
@@ -431,14 +439,32 @@ run_official_mecge_for_nv() {
     (
       cd "$APP_DIR"
       python3 mecge_table1_robustness_bins.py \
-        --metrics-per-window "$RUN_ROOT/$MECGE_RESULT_MODEL/results/$exp_name/$MECGE_MODEL_NAME/best_loss/metrics_per_window.csv" \
+        --metrics-per-window "$RUN_ROOT/$result_model/results/$exp_name/$model_name/best_loss/metrics_per_window.csv" \
         --rnd-test "$RND_TEST_FILE" \
-        --output-root "$RUN_ROOT/$MECGE_RESULT_MODEL/controlled_tests" \
-        --result-model "$MECGE_RESULT_MODEL" \
+        --output-root "$RUN_ROOT/$result_model/controlled_tests" \
+        --result-model "$result_model" \
         --noise-version "nv${nv}" \
         --seed "$seed"
     )
   fi
+}
+
+run_official_mecge_for_nv() {
+  local nv="$1"
+  local pkl_file="$2"
+  run_mecge_pipeline_job "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+}
+
+run_mecge_pipeline_family() {
+  local config="$1"
+  local result_model="$2"
+  local model_name="$3"
+  local seeds="$4"
+  local nv="$5"
+  local pkl_file="$6"
+  for seed in $seeds; do
+    run_mecge_pipeline_job "$config" "$result_model" "$model_name" "$seed" "$nv" "$pkl_file"
+  done
 }
 
 run_one_job() {
@@ -522,41 +548,41 @@ run_selected_models_for_nv() {
         exit 2
       fi
       run_official_mecge_for_nv "$nv" "$pkl_file"
-      run_model_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM" "$nv" "$pkl_file"
       ;;
     main)
-      run_one_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     mecge)
       run_official_mecge_for_nv "$nv" "$pkl_file"
       ;;
     mambattention)
-      run_one_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd)
-      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     stfrft)
-      run_one_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     stable)
-      run_one_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     eddm_fm)
-      run_one_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     eddm_fm_mamba)
-      run_one_job "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     eddm_1shot)
-      run_one_job "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_mecge_pipeline_job "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
   esac
 }

@@ -21,6 +21,7 @@ from utils import visualization as vs
 
 from pipeline import train_dl, test_dl
 import argparse
+import os
 from os.path import isfile
 import yaml
 from torch.utils.tensorboard import SummaryWriter
@@ -39,15 +40,37 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default="config/MECGE.yaml") #
     parser.add_argument('--device', type=str, default='cuda:0', help='Device')
     parser.add_argument('--n_type', type=str, default='bw', help='noise type') # 'bw' or 'em' or 'ma' or 'all' 
+    parser.add_argument('--nv', type=str, default='all', choices=['all', '1', '2'], help='Noise version')
     parser.add_argument('--test', action='store_true') # 'bw' or 'em' or 'ma' or 'all' 
     args = parser.parse_args()
 
-    makedirs('results', exist_ok=True)
+    results_dir = os.environ.get("MECGE_RESULTS_DIR", "results")
+    logs_dir = os.environ.get("MECGE_LOGS_DIR", "logs")
+    makedirs(results_dir, exist_ok=True)
+    makedirs(logs_dir, exist_ok=True)
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
         config_name = args.config.split('/')[-1].split('.')[0]
+    if 'training' in config and 'train' not in config:
+        training = config['training']
+        config['train'] = {
+            'epochs': training.get('train_epochs', training.get('epochs', 30)),
+            'batch_size': training.get('batch_size', 64),
+            'lr': training.get('lr', 1.0e-4),
+            'optimizer': training.get('optimizer', 'AdamW'),
+            'betas': training.get('betas', [0.8, 0.99]),
+            'weight_decay': training.get('weight_decay', 0.0),
+            'scheduler': training.get('scheduler', 'ExponentialLR'),
+            'gamma': training.get('gamma', 0.99),
+            'factor': training.get('factor', 0.5),
+            'lr_scheduler_patience_epochs': training.get('lr_scheduler_patience_epochs', training.get('patience', 2)),
+            'lr_scheduler_min_delta': training.get('lr_scheduler_min_delta', training.get('min_delta', 1.0e-4)),
+            'min_lr': training.get('min_lr', 0.0),
+            'early_stopping_patience_epochs': training.get('early_stopping_patience_epochs', training.get('early_stopping_patience', 30)),
+            'early_stopping_min_delta': training.get('early_stopping_min_delta', 0.0),
+        }
 
-    noise_versions = [1, 2]
+    noise_versions = [1, 2] if args.nv == 'all' else [int(args.nv)]
     n_type = args.n_type
     for nv in noise_versions:
         # Data_Preparation() function assumes that QT database and Noise Stress Test Database are uncompresed
@@ -59,7 +82,7 @@ if __name__ == "__main__":
 
 
         if not args.test:
-            log_path = f'logs/{config_name}_{n_type}_nv{nv}'
+            log_path = os.path.join(logs_dir, f'{config_name}_{n_type}_nv{nv}')
             tb_writer = SummaryWriter(log_path)
             train_dl(Dataset, config_name, n_type, config, nv, tb_writer)
             tb_writer.close() 
@@ -67,9 +90,6 @@ if __name__ == "__main__":
         [X_test, y_test, y_pred] = test_dl(Dataset, config_name, n_type, config, nv, args.device)
         test_results = [X_test, y_test, y_pred]
         # Save Results
-        with open(f'results/{config_name}_{n_type}_nv{nv}.pkl', 'wb') as output: 
+        with open(os.path.join(results_dir, f'{config_name}_{n_type}_nv{nv}.pkl'), 'wb') as output: 
                 pickle.dump(test_results, output)
         print(f'Results from experiment {config_name}_{n_type}_nv{nv} saved!')
-
-
-
