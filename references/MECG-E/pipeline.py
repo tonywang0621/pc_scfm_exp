@@ -241,6 +241,12 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
         val_metric_history = list(state.get("val_metric_history", []))
         start_epoch = int(state["epoch"]) + 1
         print(f"Resumed MECG-E training from {resume_checkpoint} at epoch {start_epoch}.")
+        if early_stopping_enabled and patience_counter >= patience:
+            print(
+                "Resume checkpoint already reached early stopping patience "
+                f"({patience_counter}/{patience}); skipping training and running test/robustness."
+            )
+            return
     else:
         for stale_path in [model_filepath, model_last_filepath, training_state_filepath, validation_metrics_filepath]:
             if os.path.exists(stale_path):
