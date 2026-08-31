@@ -36,6 +36,7 @@ pip-wheel-metadata/
 
 # Remote job scripts
 /job*.sh
+/download.sh
 
 # Model weights and serialized training state
 *.pt
