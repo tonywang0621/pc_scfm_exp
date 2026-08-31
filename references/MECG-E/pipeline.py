@@ -152,8 +152,14 @@ def _resume_checkpoint_path(experiment, n_type, nv, default_path):
     return default_path
 
 
+def _atomic_torch_save(obj, path):
+    tmp_path = f"{path}.tmp"
+    torch.save(obj, tmp_path)
+    os.replace(tmp_path, path)
+
+
 def _save_training_state(path, model, optimizer, scheduler, epoch_no, best_valid_loss, config, val_metric_history):
-    torch.save(
+    _atomic_torch_save(
         {
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
@@ -313,7 +319,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                 patience_counter = 0
                 improved = True
                 print("\n best loss is updated to ",current_valid_loss,"at", epoch_no + 1,)
-                torch.save(model.state_dict(), model_filepath)
+                _atomic_torch_save(model.state_dict(), model_filepath)
             elif early_stopping_enabled:
                 patience_counter += 1
                 print(f"No validation loss improvement. Patience: {patience_counter}/{patience}")
@@ -330,7 +336,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
             step_scheduler(lr_scheduler, current_valid_loss)
             if early_stopping_enabled and patience_counter >= patience:
                 print(f"Early stopping triggered at epoch {epoch_no + 1}.")
-                torch.save(model.state_dict(), model_last_filepath)
+                _atomic_torch_save(model.state_dict(), model_last_filepath)
                 _save_training_state(
                     training_state_filepath,
                     model,
@@ -342,7 +348,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                     val_metric_history,
                 )
                 break
-        torch.save(model.state_dict(), model_last_filepath)
+        _atomic_torch_save(model.state_dict(), model_last_filepath)
         _save_training_state(
             training_state_filepath,
             model,
