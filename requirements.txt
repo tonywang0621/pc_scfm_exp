@@ -19,7 +19,6 @@ einops>=0.7
 torch==2.2.2
 torchaudio==2.2.2
 transformers==4.39.3
-mamba_ssm>=2.2
 
 # Optional, but useful for data preparation and complexity reports.
 wfdb>=4.1
