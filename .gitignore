@@ -34,6 +34,9 @@ pip-wheel-metadata/
 /wandb/
 /mlruns/
 
+# Remote job scripts
+/job*.sh
+
 # Model weights and serialized training state
 *.pt
 *.pth
