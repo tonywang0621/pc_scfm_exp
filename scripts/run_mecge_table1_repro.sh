@@ -361,6 +361,15 @@ write_official_metrics() {
   )
 }
 
+write_mecge_loss_artifacts() {
+  local checkpoint_dir="$1"
+  (
+    cd "$APP_DIR"
+    python3 mecge_table1_plot_mecge_loss.py \
+      --checkpoint-dir "$checkpoint_dir"
+  )
+}
+
 alpha_label() {
   printf '%s\n' "$1" | sed 's/\./p/g; s/-/m/g'
 }
@@ -420,6 +429,7 @@ run_mecge_pipeline_job() {
   official_out="$(official_result_pkl "$result_model" "$nv" "$seed")"
   local official_generated="$RUN_ROOT/$result_model/native_results/${config_name}_bw_nv${nv}.pkl"
   local training_state="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name/training_state.pt"
+  local checkpoint_run_dir="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name"
   local rnd_test_file
   rnd_test_file="$(resolve_rnd_test_file "$nv")"
 
@@ -465,6 +475,7 @@ run_mecge_pipeline_job() {
   fi
   mkdir -p "$(dirname "$official_out")"
   cp "$official_generated" "$official_out"
+  write_mecge_loss_artifacts "$checkpoint_run_dir"
   write_official_metrics "$official_out" "$result_model" "$model_name" "$exp_name"
 
   if [[ "$SKIP_ROBUSTNESS" != "1" ]]; then

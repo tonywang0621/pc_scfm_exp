@@ -10,6 +10,7 @@
 #===========================================================
 
 import argparse
+import csv
 import torch
 import datetime
 import importlib.util
@@ -158,7 +159,71 @@ def _atomic_torch_save(obj, path):
     os.replace(tmp_path, path)
 
 
-def _save_training_state(path, model, optimizer, scheduler, epoch_no, best_valid_loss, config, val_metric_history):
+def _write_loss_artifacts(output_dir, train_loss_history, val_metric_history):
+    os.makedirs(output_dir, exist_ok=True)
+    rows_by_epoch = {}
+    for item in train_loss_history:
+        epoch = int(item["epoch"])
+        rows_by_epoch.setdefault(epoch, {"epoch": epoch, "step": item.get("step", ""), "train_loss": "", "val_loss": ""})
+        rows_by_epoch[epoch]["step"] = item.get("step", rows_by_epoch[epoch]["step"])
+        rows_by_epoch[epoch]["train_loss"] = item.get("train_loss", "")
+    for item in val_metric_history:
+        epoch = int(item["epoch"])
+        rows_by_epoch.setdefault(epoch, {"epoch": epoch, "step": item.get("step", ""), "train_loss": "", "val_loss": ""})
+        rows_by_epoch[epoch]["step"] = item.get("step", rows_by_epoch[epoch]["step"])
+        rows_by_epoch[epoch]["val_loss"] = item.get("val_loss", "")
+
+    csv_path = os.path.join(output_dir, "loss_history.csv")
+    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["epoch", "step", "train_loss", "val_loss"])
+        writer.writeheader()
+        writer.writerows(rows_by_epoch[epoch] for epoch in sorted(rows_by_epoch))
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        print(f"Skipping loss plots because matplotlib is unavailable: {exc}")
+        return
+
+    def plot_one(items, key, title, filename):
+        points = [(int(item["epoch"]), float(item[key])) for item in items if item.get(key) not in {"", None}]
+        if not points:
+            return
+        epochs, values = zip(*points)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(epochs, values, linewidth=2)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(os.path.join(output_dir, filename), dpi=200)
+        plt.close(fig)
+
+    plot_one(train_loss_history, "train_loss", "MECG-E Train Loss", "train_loss.png")
+    plot_one(val_metric_history, "val_loss", "MECG-E Validation Loss", "val_loss.png")
+
+    train_points = [(int(item["epoch"]), float(item["train_loss"])) for item in train_loss_history if item.get("train_loss") not in {"", None}]
+    val_points = [(int(item["epoch"]), float(item["val_loss"])) for item in val_metric_history if item.get("val_loss") not in {"", None}]
+    if train_points and val_points:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        train_epochs, train_values = zip(*train_points)
+        val_epochs, val_values = zip(*val_points)
+        ax.plot(train_epochs, train_values, label="Train Loss", linewidth=2)
+        ax.plot(val_epochs, val_values, label="Validation Loss", linewidth=2)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title("MECG-E Train / Validation Loss")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(os.path.join(output_dir, "train_val_loss.png"), dpi=200)
+        plt.close(fig)
+
+
+def _save_training_state(path, model, optimizer, scheduler, epoch_no, best_valid_loss, config, train_loss_history, val_metric_history):
     _atomic_torch_save(
         {
             "model_state_dict": model.state_dict(),
@@ -167,6 +232,7 @@ def _save_training_state(path, model, optimizer, scheduler, epoch_no, best_valid
             "epoch": epoch_no,
             "best_valid_loss": best_valid_loss,
             "patience_counter": config["train"].get("patience_counter", 0),
+            "train_loss_history": train_loss_history,
             "val_metric_history": val_metric_history,
             "config": config,
         },
@@ -182,6 +248,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
     model_last_filepath = _checkpoint_sidecar_path(model_filepath, 'model_last.pt')
     training_state_filepath = _checkpoint_sidecar_path(model_filepath, 'training_state.pt')
     validation_metrics_filepath = _checkpoint_sidecar_path(model_filepath, 'validation_metrics.yaml')
+    loss_artifact_dir = os.path.dirname(model_filepath)
     [X_train, y_train, X_test, y_test] = Dataset
 
     X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.3, shuffle=True, random_state=1)
@@ -231,6 +298,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
     patience = int(patience) if early_stopping_enabled else 0
     min_delta = float(config['train'].get('early_stopping_min_delta', 0.0))
     patience_counter = 0
+    train_loss_history = []
     val_metric_history = []
     resume = os.environ.get("MECGE_RESUME", "0") == "1"
     if resume:
@@ -244,6 +312,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
             lr_scheduler.load_state_dict(state["scheduler_state_dict"])
         best_valid_loss = state["best_valid_loss"]
         patience_counter = int(state.get("patience_counter", 0))
+        train_loss_history = list(state.get("train_loss_history", []))
         val_metric_history = list(state.get("val_metric_history", []))
         start_epoch = int(state["epoch"]) + 1
         print(f"Resumed MECG-E training from {resume_checkpoint} at epoch {start_epoch}.")
@@ -252,6 +321,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                 "Resume checkpoint already reached early stopping patience "
                 f"({patience_counter}/{patience}); skipping training and running test/robustness."
             )
+            _write_loss_artifacts(loss_artifact_dir, train_loss_history, val_metric_history)
             return
     else:
         for stale_path in [model_filepath, model_last_filepath, training_state_filepath, validation_metrics_filepath]:
@@ -282,7 +352,17 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                     },
                     refresh=True,
                 )
-            
+        current_train_loss = avg_loss / batch_no
+        current_step = (epoch_no + 1) * len(train_loader)
+        train_record = {
+            "epoch": int(epoch_no + 1),
+            "step": int(current_step),
+            "train_loss": float(current_train_loss),
+        }
+        train_loss_history.append(train_record)
+        if tb_writer is not None:
+            tb_writer.add_scalar('train_loss', current_train_loss, epoch_no)
+
         if valid_loader is not None and (epoch_no + 1) % valid_epoch_interval == 0:
             model.eval()
             avg_loss_valid = 0
@@ -308,7 +388,6 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                 tb_writer.add_scalar('val_loss', avg_loss_valid / batch_no, epoch_no)
             
             current_valid_loss = avg_loss_valid / batch_no
-            current_step = (epoch_no + 1) * len(train_loader)
             val_metrics = validation_metric_summary(
                 np.concatenate(val_clean_batches, axis=0),
                 np.concatenate(val_pred_batches, axis=0),
@@ -345,8 +424,10 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                     epoch_no,
                     best_valid_loss,
                     config,
+                    train_loss_history,
                     val_metric_history,
                 )
+                _write_loss_artifacts(loss_artifact_dir, train_loss_history, val_metric_history)
                 break
         _atomic_torch_save(model.state_dict(), model_last_filepath)
         _save_training_state(
@@ -357,8 +438,10 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
             epoch_no,
             best_valid_loss,
             config,
+            train_loss_history,
             val_metric_history,
         )
+        _write_loss_artifacts(loss_artifact_dir, train_loss_history, val_metric_history)
 
 
 
