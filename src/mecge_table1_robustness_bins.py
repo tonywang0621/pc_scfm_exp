@@ -32,7 +32,7 @@ def read_metric_rows(path):
 
 
 def summarize(values):
-    arr = np.asarray(values, dtype=np.float64)
+    arr = np.asarray(list(values), dtype=np.float64)
     arr = arr[~np.isnan(arr)]
     return {
         "mean": float(np.mean(arr)) if arr.size else float("nan"),
