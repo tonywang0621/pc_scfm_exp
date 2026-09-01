@@ -46,6 +46,8 @@ Options:
   --prepare-raw          Recreate dataset_bw_nv*.pkl from raw QTDB/NSTDB before training.
   --device DEVICE       Training/inference device. Default: cuda:0
   --model NAME          One of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd,
+                        dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step8,
+                        dualpath_dapp_cfm_unet_bd_no_attention,
                         stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
   --seed N              Run one seed only. Default for single-model jobs: 3407.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
@@ -68,6 +70,9 @@ Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model mecge --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model mambattention --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd_step4 --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd_step8 --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd_no_attention --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stable --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 3407 --nv 1 --device cuda:0
@@ -236,6 +241,15 @@ normalize_model() {
     dualpath_dapp_cfm_unet_bd|mambattention_dualpath_dapp_cfm_unet_bd|mambattention_dualpath_dapp_cfm_unet_bd_ecg)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd"
       ;;
+    dualpath_dapp_cfm_unet_bd_step4|mambattention_dualpath_dapp_cfm_unet_bd_step4)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_step4"
+      ;;
+    dualpath_dapp_cfm_unet_bd_step8|mambattention_dualpath_dapp_cfm_unet_bd_step8)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_step8"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention|mambattention_dualpath_dapp_cfm_unet_bd_no_attention)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention"
+      ;;
     stfrft|mambattention_stfrft|mambattention_stfrft_ecg)
       printf '%s\n' "stfrft"
       ;;
@@ -255,7 +269,7 @@ normalize_model() {
       printf '%s\n' "eddm_1shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
+      echo "Unsupported --model '$1'. Expected one of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
       exit 2
       ;;
   esac
@@ -568,6 +582,15 @@ MAMBATTENTION_MODEL_NAME="mambattention_ecg"
 DUALPATH_DAPP_CFM_UNET_BD_CONFIG="configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd.yaml"
 DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL="mambattention_dualpath_dapp_cfm_unet_bd"
 DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
+DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG="configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd_step4.yaml"
+DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL="mambattention_dualpath_dapp_cfm_unet_bd_step4"
+DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
+DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG="configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd_step8.yaml"
+DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL="mambattention_dualpath_dapp_cfm_unet_bd_step8"
+DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG="configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd_no_attention.yaml"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL="mambattention_dualpath_dapp_cfm_unet_bd_no_attention"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
 STFRFT_CONFIG="configs/mecge_table1_repro_mambattention_stfrft.yaml"
 STFRFT_RESULT_MODEL="mambattention_stfrft"
 STFRFT_MODEL_NAME="mambattention_stfrft_ecg"
@@ -597,6 +620,9 @@ run_selected_models_for_nv() {
       run_official_mecge_for_nv "$nv" "$pkl_file"
       run_mecge_pipeline_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
@@ -615,6 +641,15 @@ run_selected_models_for_nv() {
       ;;
     dualpath_dapp_cfm_unet_bd)
       run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    dualpath_dapp_cfm_unet_bd_step4)
+      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    dualpath_dapp_cfm_unet_bd_step8)
+      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention)
+      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     stfrft)
       run_mecge_pipeline_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
