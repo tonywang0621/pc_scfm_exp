@@ -12,7 +12,12 @@ DEVICE="${DEVICE:-cuda:0}"
 PKL_FILE="${PKL_FILE:-}"
 QTDB_RAW="${QTDB_RAW:-$DATA_ROOT/raw/QTDB}"
 NSTDB_RAW="${NSTDB_RAW:-$DATA_ROOT/raw/NSTDB}"
-RND_TEST_FILE="${RND_TEST_FILE:-$ROOT_DIR/references/MECG-E/rnd_test.npy}"
+if [[ -n "${RND_TEST_FILE+x}" ]]; then
+  RND_TEST_FILE_USER_SET=1
+else
+  RND_TEST_FILE="$ROOT_DIR/references/MECG-E/rnd_test.npy"
+  RND_TEST_FILE_USER_SET=0
+fi
 FORCE_PREPARE_RAW="${FORCE_PREPARE_RAW:-0}"
 SKIP_TRAIN="${SKIP_TRAIN:-0}"
 SKIP_ROBUSTNESS="${SKIP_ROBUSTNESS:-0}"
@@ -93,6 +98,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rnd-test)
       RND_TEST_FILE="$2"
+      RND_TEST_FILE_USER_SET=1
       shift 2
       ;;
     --prepare-raw)
@@ -147,6 +153,19 @@ done
 if [[ "$RND_TEST_FILE" != /* ]]; then
   RND_TEST_FILE="$ROOT_DIR/$RND_TEST_FILE"
 fi
+
+resolve_rnd_test_file() {
+  local nv="$1"
+  local prepared_rnd="$DATA_ROOT/raw/rnd_test_nv${nv}.npy"
+  local reference_rnd="$OFFICIAL_MECGE_DIR/rnd_test_nv${nv}.npy"
+  if [[ "$RND_TEST_FILE_USER_SET" == "0" && -f "$prepared_rnd" ]]; then
+    printf '%s\n' "$prepared_rnd"
+  elif [[ "$RND_TEST_FILE_USER_SET" == "0" && -f "$reference_rnd" ]]; then
+    printf '%s\n' "$reference_rnd"
+  else
+    printf '%s\n' "$RND_TEST_FILE"
+  fi
+}
 
 mkdir -p "$DATA_ROOT/raw" "$DATA_ROOT/controlled_tests" "$RUN_ROOT/analysis"
 
@@ -353,6 +372,8 @@ run_exp2_inference() {
   local nv="$6"
   local pkl_file="$7"
   local metrics_per_window="$RUN_ROOT/$result_model/results/$exp_name_train/$model_name/best_loss/metrics_per_window.csv"
+  local rnd_test_file
+  rnd_test_file="$(resolve_rnd_test_file "$nv")"
 
   if [[ "$SKIP_ROBUSTNESS" == "1" ]]; then
     return 0
@@ -361,9 +382,9 @@ run_exp2_inference() {
     echo "Missing official-style per-window metrics for robustness: $metrics_per_window" >&2
     exit 1
   fi
-  if [[ ! -f "$RND_TEST_FILE" ]]; then
-    echo "Missing official MECG-E rnd_test.npy for robustness bins: $RND_TEST_FILE" >&2
-    echo "Clone khhungg/MECG-E to references/MECG-E, or pass --rnd-test PATH." >&2
+  if [[ ! -f "$rnd_test_file" ]]; then
+    echo "Missing MECG-E rnd_test file for robustness bins: $rnd_test_file" >&2
+    echo "Use --prepare-raw to create data/mecge_table1_repro/raw/rnd_test_nv*.npy, clone khhungg/MECG-E to references/MECG-E, or pass --rnd-test PATH." >&2
     exit 1
   fi
 
@@ -371,7 +392,7 @@ run_exp2_inference() {
     cd "$APP_DIR"
     python3 mecge_table1_robustness_bins.py \
       --metrics-per-window "$metrics_per_window" \
-      --rnd-test "$RND_TEST_FILE" \
+      --rnd-test "$rnd_test_file" \
       --output-root "$RUN_ROOT/$result_model/controlled_tests" \
       --result-model "$result_model" \
       --noise-version "nv${nv}" \
@@ -395,6 +416,8 @@ run_mecge_pipeline_job() {
   fi
   local official_out
   official_out="$(official_result_pkl "$result_model" "$nv" "$seed")"
+  local rnd_test_file
+  rnd_test_file="$(resolve_rnd_test_file "$nv")"
 
   if [[ ! -d "$OFFICIAL_MECGE_DIR" ]]; then
     echo "Missing official MECG-E clone: $OFFICIAL_MECGE_DIR" >&2
@@ -432,15 +455,15 @@ run_mecge_pipeline_job() {
   write_official_metrics "$official_out" "$result_model" "$model_name" "$exp_name"
 
   if [[ "$SKIP_ROBUSTNESS" != "1" ]]; then
-    if [[ ! -f "$RND_TEST_FILE" ]]; then
-      echo "Missing official MECG-E rnd_test.npy for robustness bins: $RND_TEST_FILE" >&2
+    if [[ ! -f "$rnd_test_file" ]]; then
+      echo "Missing MECG-E rnd_test file for robustness bins: $rnd_test_file" >&2
       exit 1
     fi
     (
       cd "$APP_DIR"
       python3 mecge_table1_robustness_bins.py \
         --metrics-per-window "$RUN_ROOT/$result_model/results/$exp_name/$model_name/best_loss/metrics_per_window.csv" \
-        --rnd-test "$RND_TEST_FILE" \
+        --rnd-test "$rnd_test_file" \
         --output-root "$RUN_ROOT/$result_model/controlled_tests" \
         --result-model "$result_model" \
         --noise-version "nv${nv}" \
@@ -608,11 +631,19 @@ done
 
 (
   cd "$APP_DIR"
+  rnd_test_nv1="$(resolve_rnd_test_file 1)"
+  rnd_test_nv2="$(resolve_rnd_test_file 2)"
   python3 mecge_table1_collect_results.py \
     --run-root "$RUN_ROOT" \
     --noise-version all \
     --output-dir "$RUN_ROOT/analysis"
-  if [[ -f "$RND_TEST_FILE" ]]; then
+  if [[ "$RND_TEST_FILE_USER_SET" == "0" && "$rnd_test_nv1" != "$RND_TEST_FILE" && "$rnd_test_nv2" != "$RND_TEST_FILE" ]]; then
+    python3 mecge_table1_collect_official_protocol.py \
+      --official-results-dir "$RUN_ROOT/official_results" \
+      --rnd-test-nv1 "$rnd_test_nv1" \
+      --rnd-test-nv2 "$rnd_test_nv2" \
+      --output-dir "$RUN_ROOT/analysis"
+  elif [[ -f "$RND_TEST_FILE" ]]; then
     python3 mecge_table1_collect_official_protocol.py \
       --official-results-dir "$RUN_ROOT/official_results" \
       --rnd-test "$RND_TEST_FILE" \

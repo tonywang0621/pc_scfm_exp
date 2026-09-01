@@ -15,7 +15,9 @@ BIN_EDGES = (0.2, 0.6, 1.0, 1.5, 2.0)
 def parse_args():
     parser = argparse.ArgumentParser(description="Collect MECG-E official nv1+nv2 protocol metrics.")
     parser.add_argument("--official-results-dir", required=True)
-    parser.add_argument("--rnd-test", required=True)
+    parser.add_argument("--rnd-test", default=None)
+    parser.add_argument("--rnd-test-nv1", default=None)
+    parser.add_argument("--rnd-test-nv2", default=None)
     parser.add_argument("--output-dir", required=True)
     return parser.parse_args()
 
@@ -98,7 +100,19 @@ def main():
     args = parse_args()
     results_dir = Path(args.official_results_dir)
     output_dir = Path(args.output_dir)
-    rnd_test_single = np.asarray(np.load(args.rnd_test), dtype=np.float64)
+    if args.rnd_test_nv1 and args.rnd_test_nv2:
+        rnd_test_combined = np.concatenate(
+            [
+                np.asarray(np.load(args.rnd_test_nv1), dtype=np.float64),
+                np.asarray(np.load(args.rnd_test_nv2), dtype=np.float64),
+            ],
+            axis=0,
+        )
+    elif args.rnd_test:
+        rnd_test_single = np.asarray(np.load(args.rnd_test), dtype=np.float64)
+        rnd_test_combined = np.concatenate([rnd_test_single, rnd_test_single], axis=0)
+    else:
+        raise ValueError("Provide either --rnd-test or both --rnd-test-nv1 and --rnd-test-nv2.")
 
     grouped = {}
     for path in results_dir.glob("*__qtdb_train_qtdb_test__nv*__seed*.pkl"):
@@ -132,7 +146,7 @@ def main():
         metric_fields(row, metrics)
         table_rows.append(row)
 
-        rnd_test = np.concatenate([rnd_test_single, rnd_test_single], axis=0)
+        rnd_test = rnd_test_combined
         if len(rnd_test) != len(clean):
             raise ValueError(f"duplicated rnd_test length {len(rnd_test)} != combined result length {len(clean)} for {model}.")
         for low, high in zip(BIN_EDGES[:-1], BIN_EDGES[1:]):
