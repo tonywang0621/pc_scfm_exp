@@ -19,6 +19,7 @@ else
   RND_TEST_FILE_USER_SET=0
 fi
 FORCE_PREPARE_RAW="${FORCE_PREPARE_RAW:-0}"
+FORCE_RERUN="${FORCE_RERUN:-0}"
 SKIP_TRAIN="${SKIP_TRAIN:-0}"
 SKIP_ROBUSTNESS="${SKIP_ROBUSTNESS:-0}"
 RESUME="${RESUME:-0}"
@@ -60,6 +61,7 @@ Environment overrides:
   RND_TEST_FILE="references/MECG-E/rnd_test.npy"
   QTDB_RAW="data/mecge_table1_repro/raw/QTDB"
   NSTDB_RAW="data/mecge_table1_repro/raw/NSTDB"
+  FORCE_RERUN=1 retrains even when an official-style result pkl already exists.
 
 Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 3407 --nv 1 --device cuda:0
@@ -416,6 +418,8 @@ run_mecge_pipeline_job() {
   fi
   local official_out
   official_out="$(official_result_pkl "$result_model" "$nv" "$seed")"
+  local official_generated="$RUN_ROOT/$result_model/native_results/${config_name}_bw_nv${nv}.pkl"
+  local training_state="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name/training_state.pt"
   local rnd_test_file
   rnd_test_file="$(resolve_rnd_test_file "$nv")"
 
@@ -424,17 +428,27 @@ run_mecge_pipeline_job() {
     exit 1
   fi
 
-  if [[ "$SKIP_TRAIN" != "1" ]]; then
+  if [[ "$SKIP_TRAIN" != "1" && "$FORCE_RERUN" != "1" && -f "$official_generated" ]]; then
+    echo "Found existing MECG-E-pipeline result for nv${nv}; skipping train/test: $official_generated"
+  elif [[ "$SKIP_TRAIN" != "1" ]]; then
     mkdir -p "$OFFICIAL_MECGE_DIR/data" "$RUN_ROOT/$result_model/native_results" "$RUN_ROOT/$result_model/log"
     cp "$pkl_file" "$OFFICIAL_MECGE_DIR/data/dataset_bw_nv${nv}.pkl"
     (
       cd "$OFFICIAL_MECGE_DIR"
+      job_resume="$RESUME"
+      if [[ "$FORCE_RERUN" != "1" && -f "$training_state" ]]; then
+        job_resume=1
+        echo "Found existing training state for nv${nv}; resuming: $training_state"
+      elif [[ "$RESUME" == "1" ]]; then
+        job_resume=0
+        echo "No training state for nv${nv}; starting this noise version from scratch."
+      fi
       export MECGE_APP_DIR="$APP_DIR"
       export MECGE_DEVICE="$DEVICE"
       export MECGE_MODEL_WEIGHT_TEMPLATE="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name/best_model.pt"
       export MECGE_RESULTS_DIR="$RUN_ROOT/$result_model/native_results"
       export MECGE_LOGS_DIR="$RUN_ROOT/$result_model/log"
-      export MECGE_RESUME="$RESUME"
+      export MECGE_RESUME="$job_resume"
       if [[ "$model_name" != "$MECGE_MODEL_NAME" ]]; then
         export MECGE_PROJECT_MODEL_NAME="$model_name"
       fi
@@ -445,7 +459,6 @@ run_mecge_pipeline_job() {
     )
   fi
 
-  local official_generated="$RUN_ROOT/$result_model/native_results/${config_name}_bw_nv${nv}.pkl"
   if [[ ! -f "$official_generated" ]]; then
     echo "Missing MECG-E-pipeline result: $official_generated" >&2
     exit 1
