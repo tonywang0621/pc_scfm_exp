@@ -49,7 +49,10 @@ Options:
                         dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4,
                         dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8,
                         dualpath_dapp_cfm_unet_bd_no_attention,
-                        stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
+                        stfrft, main, stable, baseline_sentry_lite,
+                        baseline_sentry_flow, physio_freq_sentry_flow,
+                        mecge_resflow_lite,
+                        eddm_fm, eddm_fm_mamba, eddm_1shot.
   --seed N              Run one seed only. Default for single-model jobs: 3407.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
   --skip-robustness     Only run train + QTDB pkl test.
@@ -82,6 +85,10 @@ Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm_mamba --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 3407 --nv 1 --resume --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model baseline_sentry_lite --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model baseline_sentry_flow --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model physio_freq_sentry_flow --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mecge_resflow_lite --seed 3407 --nv 1 --device cuda:0
 
 100% DeepFilter/MECG-E raw-prep example:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 3407 --nv all --prepare-raw --device cuda:0
@@ -268,6 +275,18 @@ normalize_model() {
     stable|mambattention_stfrft_dualpath_dapp_stable_cfm_unet)
       printf '%s\n' "stable"
       ;;
+    baseline_sentry_lite)
+      printf '%s\n' "baseline_sentry_lite"
+      ;;
+    baseline_sentry_flow)
+      printf '%s\n' "baseline_sentry_flow"
+      ;;
+    physio_freq_sentry_flow)
+      printf '%s\n' "physio_freq_sentry_flow"
+      ;;
+    mecge_resflow_lite)
+      printf '%s\n' "mecge_resflow_lite"
+      ;;
     eddm_fm|eddm_flow_matching)
       printf '%s\n' "eddm_fm"
       ;;
@@ -278,7 +297,7 @@ normalize_model() {
       printf '%s\n' "eddm_1shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
+      echo "Unsupported --model '$1'. Expected one of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, stfrft, main, stable, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
       exit 2
       ;;
   esac
@@ -612,6 +631,18 @@ STFRFT_MODEL_NAME="mambattention_stfrft_ecg"
 STABLE_CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_stable_cfm_unet.yaml"
 STABLE_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_stable_cfm_unet"
 STABLE_MODEL_NAME="mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg"
+BASELINE_SENTRY_LITE_CONFIG="configs/mecge_table1_repro_baseline_sentry_lite.yaml"
+BASELINE_SENTRY_LITE_RESULT_MODEL="baseline_sentry_lite"
+BASELINE_SENTRY_LITE_MODEL_NAME="baseline_sentry_lite"
+BASELINE_SENTRY_FLOW_CONFIG="configs/mecge_table1_repro_baseline_sentry_flow.yaml"
+BASELINE_SENTRY_FLOW_RESULT_MODEL="baseline_sentry_flow"
+BASELINE_SENTRY_FLOW_MODEL_NAME="baseline_sentry_flow"
+PHYSIO_FREQ_SENTRY_FLOW_CONFIG="configs/mecge_table1_repro_physio_freq_sentry_flow.yaml"
+PHYSIO_FREQ_SENTRY_FLOW_RESULT_MODEL="physio_freq_sentry_flow"
+PHYSIO_FREQ_SENTRY_FLOW_MODEL_NAME="physio_freq_sentry_flow"
+MECGE_RESFLOW_LITE_CONFIG="configs/mecge_table1_repro_mecge_resflow_lite.yaml"
+MECGE_RESFLOW_LITE_RESULT_MODEL="mecge_resflow_lite"
+MECGE_RESFLOW_LITE_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
 EDDM_FM_CONFIG="configs/mecge_table1_repro_eddm_flow_matching.yaml"
 EDDM_FM_RESULT_MODEL="eddm_flow_matching"
 EDDM_FM_MODEL_NAME="eddm_flow_matching"
@@ -643,6 +674,10 @@ run_selected_models_for_nv() {
       run_mecge_pipeline_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$BASELINE_SENTRY_LITE_CONFIG" "$BASELINE_SENTRY_LITE_RESULT_MODEL" "$BASELINE_SENTRY_LITE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$BASELINE_SENTRY_FLOW_CONFIG" "$BASELINE_SENTRY_FLOW_RESULT_MODEL" "$BASELINE_SENTRY_FLOW_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$PHYSIO_FREQ_SENTRY_FLOW_CONFIG" "$PHYSIO_FREQ_SENTRY_FLOW_RESULT_MODEL" "$PHYSIO_FREQ_SENTRY_FLOW_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_mecge_pipeline_family "$MECGE_RESFLOW_LITE_CONFIG" "$MECGE_RESFLOW_LITE_RESULT_MODEL" "$MECGE_RESFLOW_LITE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_mecge_pipeline_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM" "$nv" "$pkl_file"
@@ -679,6 +714,18 @@ run_selected_models_for_nv() {
       ;;
     stable)
       run_mecge_pipeline_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    baseline_sentry_lite)
+      run_mecge_pipeline_job "$BASELINE_SENTRY_LITE_CONFIG" "$BASELINE_SENTRY_LITE_RESULT_MODEL" "$BASELINE_SENTRY_LITE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    baseline_sentry_flow)
+      run_mecge_pipeline_job "$BASELINE_SENTRY_FLOW_CONFIG" "$BASELINE_SENTRY_FLOW_RESULT_MODEL" "$BASELINE_SENTRY_FLOW_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    physio_freq_sentry_flow)
+      run_mecge_pipeline_job "$PHYSIO_FREQ_SENTRY_FLOW_CONFIG" "$PHYSIO_FREQ_SENTRY_FLOW_RESULT_MODEL" "$PHYSIO_FREQ_SENTRY_FLOW_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    mecge_resflow_lite)
+      run_mecge_pipeline_job "$MECGE_RESFLOW_LITE_CONFIG" "$MECGE_RESFLOW_LITE_RESULT_MODEL" "$MECGE_RESFLOW_LITE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     eddm_fm)
       run_mecge_pipeline_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"

@@ -62,6 +62,18 @@ case "$MODEL" in
   mambattention_stfrft_dualpath_dapp_stable_cfm_unet|mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg)
     CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_stable_cfm_unet.yaml"
     ;;
+  baseline_sentry_lite)
+    CONFIG="configs/mecge_table1_repro_baseline_sentry_lite.yaml"
+    ;;
+  baseline_sentry_flow)
+    CONFIG="configs/mecge_table1_repro_baseline_sentry_flow.yaml"
+    ;;
+  physio_freq_sentry_flow)
+    CONFIG="configs/mecge_table1_repro_physio_freq_sentry_flow.yaml"
+    ;;
+  mecge_resflow_lite)
+    CONFIG="configs/mecge_table1_repro_mecge_resflow_lite.yaml"
+    ;;
   mambattention_stfrft_eddm_distill|mambattention_stfrft_eddm_distill_ecg)
     CONFIG="configs/ecg_baseline_wander_mambattention_stfrft_eddm_distill.yaml"
     ;;
@@ -100,7 +112,7 @@ case "$MODEL" in
     ;;
   *)
     echo "Unknown model: $MODEL" >&2
-    echo "Expected one of: pc_scfm, pc_scfm_rl_no_flow, pc_scfm_rl_no_flow_no_attention, mecg_e, mambattention, mambattention_stfrft, mambattention_stfrft_bag, mambattention_stfrft_lf_morph, mambattention_stfrft_dualpath_dapp, mambattention_stfrft_dualpath_dapp_h4, mambattention_stfrft_dualpath_dapp_h16, mambattention_stfrft_dualpath_dapp_h32, mambattention_stfrft_dualpath_dapp_v2, mambattention_stfrft_dualpath_dapp_cfm_residual, mambattention_stfrft_dualpath_dapp_cfm_unet_bd, mambattention_dualpath_dapp_cfm_unet_bd, mambattention_stfrft_dualpath_dapp_stable_cfm_unet, mambattention_stfrft_eddm_distill, eddm, eddm_flow_matching, eddm_flow_matching_mamba, fcn_dae, deepfilter, descod_ecg_1shot, descod_ecg_5shot, descod_ecg_10shot, drnn, fir_filter, iir_filter, or a configs/*.yaml path" >&2
+    echo "Expected one of: pc_scfm, pc_scfm_rl_no_flow, pc_scfm_rl_no_flow_no_attention, mecg_e, mambattention, mambattention_stfrft, mambattention_stfrft_bag, mambattention_stfrft_lf_morph, mambattention_stfrft_dualpath_dapp, mambattention_stfrft_dualpath_dapp_h4, mambattention_stfrft_dualpath_dapp_h16, mambattention_stfrft_dualpath_dapp_h32, mambattention_stfrft_dualpath_dapp_v2, mambattention_stfrft_dualpath_dapp_cfm_residual, mambattention_stfrft_dualpath_dapp_cfm_unet_bd, mambattention_dualpath_dapp_cfm_unet_bd, mambattention_stfrft_dualpath_dapp_stable_cfm_unet, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, mambattention_stfrft_eddm_distill, eddm, eddm_flow_matching, eddm_flow_matching_mamba, fcn_dae, deepfilter, descod_ecg_1shot, descod_ecg_5shot, descod_ecg_10shot, drnn, fir_filter, iir_filter, or a configs/*.yaml path" >&2
     exit 2
     ;;
 esac
