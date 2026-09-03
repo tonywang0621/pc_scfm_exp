@@ -17,9 +17,10 @@ import sys
 sys.path.append('mamba')
 from functools import partial
 from mamba_ssm import Mamba
-from mamba_ssm.modules.mamba_simple import Mamba, Block
+from mamba_ssm.modules.mamba_simple import Mamba
+from mamba_ssm.modules.block import Block
 from mamba_ssm.models.mixer_seq_simple import _init_weights
-from mamba_ssm.ops.triton.layernorm import RMSNorm
+from mamba_ssm.ops.triton.layer_norm import RMSNorm
 
 
 def get_padding(kernel_size, dilation=1):
@@ -104,6 +105,7 @@ class MambaBlock(nn.Module):
                 Block(
                     in_channels,
                     mixer_cls=partial(Mamba, layer_idx=i, d_state=16, d_conv=4, expand=4, use_fast_path=True),
+                    mlp_cls=nn.Identity,
                     norm_cls=partial(RMSNorm, eps=1e-5),
                     fused_add_norm=False,
                 )
@@ -115,6 +117,7 @@ class MambaBlock(nn.Module):
                         Block(
                         in_channels,
                         mixer_cls=partial(Mamba, layer_idx=i, d_state=16, d_conv=4, expand=4, use_fast_path=True),
+                        mlp_cls=nn.Identity,
                         norm_cls=partial(RMSNorm, eps=1e-5),
                         fused_add_norm=False,
                     )
@@ -461,5 +464,3 @@ class MECGE(nn.Module):
             loss_gen_all += loss_con * 0.5
         
         return loss_gen_all
-
-

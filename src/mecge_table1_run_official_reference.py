@@ -55,12 +55,16 @@ def main():
 
     os.chdir(mecge_dir)
     wrapper_dir = Path(__file__).resolve().parent
+    mecge_mamba_dir = mecge_dir / "mamba"
     sys.path = [
         str(mecge_dir),
+        str(mecge_mamba_dir),
         *[
             path
             for path in sys.path
-            if path and Path(path).resolve() != wrapper_dir
+            if path
+            and Path(path).resolve() != wrapper_dir
+            and Path(path).resolve() != mecge_mamba_dir
         ],
     ]
     sys.modules.pop("models", None)
