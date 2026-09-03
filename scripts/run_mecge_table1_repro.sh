@@ -373,7 +373,7 @@ run_train() {
       "exp_name=$exp_name" \
       "seed=$seed" \
       "device=$DEVICE" \
-      "training.train_epochs=30" \
+      "training.train_epochs=50000" \
       "training.optimizer=AdamW" \
       "training.betas=[0.8,0.99]" \
       "training.weight_decay=0.01" \
@@ -382,7 +382,7 @@ run_train() {
       "training.grad_clip_norm=null" \
       "training.eval_every_epochs=1" \
       "training.validation_metrics_every_epochs=1" \
-      "training.early_stopping_patience_epochs=null" \
+      "training.early_stopping_patience_epochs=30" \
       "training.selection_metric=val_loss" \
       "training.num_workers=0" \
       "training.train_drop_last=true" \
