@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT_DIR/src"
 OFFICIAL_MECGE_DIR="$ROOT_DIR/references/MECG-E"
-DATA_ROOT="$ROOT_DIR/data/mecge_table1_repro"
-RUN_ROOT="$ROOT_DIR/runs/mecge_table1_repro"
+DATA_ROOT="${DATA_ROOT:-$ROOT_DIR/data/mecge_table1_repro}"
+RUN_ROOT="${RUN_ROOT:-$ROOT_DIR/runs/mecge_table1_repro}"
 
 NV="${NV:-all}"
 DEVICE="${DEVICE:-cuda:0}"
@@ -15,7 +15,7 @@ NSTDB_RAW="${NSTDB_RAW:-$DATA_ROOT/raw/NSTDB}"
 if [[ -n "${RND_TEST_FILE+x}" ]]; then
   RND_TEST_FILE_USER_SET=1
 else
-  RND_TEST_FILE="$ROOT_DIR/references/MECG-E/rnd_test.npy"
+  RND_TEST_FILE="$DATA_ROOT/raw/rnd_test.npy"
   RND_TEST_FILE_USER_SET=0
 fi
 FORCE_PREPARE_RAW="${FORCE_PREPARE_RAW:-0}"
@@ -54,6 +54,7 @@ Options:
                         mecge_resflow_lite,
                         eddm_fm, eddm_fm_mamba, eddm_1shot.
   --seed N              Run one seed only. Default for single-model jobs: 3407.
+                        Official MECG-E always uses the reference seed 3407.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
   --skip-robustness     Only run train + QTDB pkl test.
   --resume              Resume training from training_state.pt for the selected run.
@@ -67,6 +68,8 @@ Environment overrides:
   RND_TEST_FILE="references/MECG-E/rnd_test.npy"
   QTDB_RAW="data/mecge_table1_repro/raw/QTDB"
   NSTDB_RAW="data/mecge_table1_repro/raw/NSTDB"
+  DATA_ROOT="data/mecge_table1_repro"
+  RUN_ROOT="runs/mecge_table1_repro"
   FORCE_RERUN=1 retrains even when an official-style result pkl already exists.
 
 Single-job examples:
@@ -91,7 +94,7 @@ Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model mecge_resflow_lite --seed 3407 --nv 1 --device cuda:0
 
 100% DeepFilter/MECG-E raw-prep example:
-  bash scripts/run_mecge_table1_repro.sh --model main --seed 3407 --nv all --prepare-raw --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mecge --nv all --prepare-raw --device cuda:0
 USAGE
 }
 
@@ -174,9 +177,12 @@ fi
 resolve_rnd_test_file() {
   local nv="$1"
   local prepared_rnd="$DATA_ROOT/raw/rnd_test_nv${nv}.npy"
+  local prepared_shared_rnd="$DATA_ROOT/raw/rnd_test.npy"
   local reference_rnd="$OFFICIAL_MECGE_DIR/rnd_test_nv${nv}.npy"
   if [[ "$RND_TEST_FILE_USER_SET" == "0" && -f "$prepared_rnd" ]]; then
     printf '%s\n' "$prepared_rnd"
+  elif [[ "$RND_TEST_FILE_USER_SET" == "0" && -f "$prepared_shared_rnd" ]]; then
+    printf '%s\n' "$prepared_shared_rnd"
   elif [[ "$RND_TEST_FILE_USER_SET" == "0" && -f "$reference_rnd" ]]; then
     printf '%s\n' "$reference_rnd"
   else
@@ -327,6 +333,13 @@ prepare_raw_if_needed() {
 
 TARGET_MODEL="$(normalize_model "$TARGET_MODEL")"
 
+if [[ "$TARGET_MODEL" == "mecge" || "$TARGET_MODEL" == "all" ]]; then
+  if [[ "$TARGET_MODEL" == "mecge" && -n "$TARGET_SEED" && "$TARGET_SEED" != "3407" ]]; then
+    echo "Official MECG-E reference pipeline hardcodes seed 3407; do not pass --seed for --model mecge." >&2
+    exit 2
+  fi
+fi
+
 run_train() {
   local config="$1"
   local result_model="$2"
@@ -453,7 +466,7 @@ run_exp2_inference() {
   )
 }
 
-run_mecge_pipeline_job() {
+run_official_mecge_reference_job() {
   local config="$1"
   local result_model="$2"
   local model_name="$3"
@@ -461,53 +474,50 @@ run_mecge_pipeline_job() {
   local nv="$5"
   local pkl_file="$6"
   local exp_name="${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
-  local config_path="$config"
   local config_name
-  config_name="$(basename "$config_path" .yaml)"
-  if [[ "$config_path" != /* ]]; then
-    config_path="$APP_DIR/$config_path"
-  fi
+  config_name="$(basename "$config" .yaml)"
   local official_out
   official_out="$(official_result_pkl "$result_model" "$nv" "$seed")"
   local official_generated="$RUN_ROOT/$result_model/native_results/${config_name}_bw_nv${nv}.pkl"
-  local training_state="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name/training_state.pt"
-  local checkpoint_run_dir="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name"
+  local checkpoint_run_dir="$RUN_ROOT/$result_model/checkpoint/$exp_name/$model_name"
+  local log_run_dir="$RUN_ROOT/$result_model/log/$exp_name/$model_name"
   local rnd_test_file
+  local official_runner_args=()
   rnd_test_file="$(resolve_rnd_test_file "$nv")"
 
   if [[ ! -d "$OFFICIAL_MECGE_DIR" ]]; then
     echo "Missing official MECG-E clone: $OFFICIAL_MECGE_DIR" >&2
     exit 1
   fi
+  if [[ "$SKIP_TRAIN" == "1" ]]; then
+    official_runner_args+=(--skip-train)
+  fi
+  if [[ "$RESUME" == "1" ]]; then
+    official_runner_args+=(--resume)
+  fi
+  if [[ -n "$RESUME_CHECKPOINT" ]]; then
+    official_runner_args+=(--resume-checkpoint "$RESUME_CHECKPOINT")
+  fi
 
-  if [[ "$SKIP_TRAIN" != "1" && "$FORCE_RERUN" != "1" && -f "$official_generated" ]]; then
-    echo "Found existing MECG-E-pipeline result for nv${nv}; skipping train/test: $official_generated"
-  elif [[ "$SKIP_TRAIN" != "1" ]]; then
-    mkdir -p "$OFFICIAL_MECGE_DIR/data" "$RUN_ROOT/$result_model/native_results" "$RUN_ROOT/$result_model/log"
-    cp "$pkl_file" "$OFFICIAL_MECGE_DIR/data/dataset_bw_nv${nv}.pkl"
+  if [[ "$RESUME" != "1" && "$FORCE_RERUN" != "1" && -f "$official_generated" ]]; then
+    echo "Found existing official MECG-E result for nv${nv}; skipping train/test: $official_generated"
+  else
+    mkdir -p "$RUN_ROOT/$result_model/native_results" "$checkpoint_run_dir" "$log_run_dir"
     (
-      cd "$OFFICIAL_MECGE_DIR"
-      job_resume="$RESUME"
-      if [[ "$FORCE_RERUN" != "1" && -f "$training_state" ]]; then
-        job_resume=1
-        echo "Found existing training state for nv${nv}; resuming: $training_state"
-      elif [[ "$RESUME" == "1" ]]; then
-        job_resume=0
-        echo "No training state for nv${nv}; starting this noise version from scratch."
-      fi
-      export MECGE_APP_DIR="$APP_DIR"
-      export MECGE_DEVICE="$DEVICE"
-      export MECGE_MODEL_WEIGHT_TEMPLATE="$RUN_ROOT/$result_model/checkpoint/${exp_name}/$model_name/best_model.pt"
-      export MECGE_RESULTS_DIR="$RUN_ROOT/$result_model/native_results"
-      export MECGE_LOGS_DIR="$RUN_ROOT/$result_model/log"
-      export MECGE_RESUME="$job_resume"
-      if [[ "$model_name" != "$MECGE_MODEL_NAME" ]]; then
-        export MECGE_PROJECT_MODEL_NAME="$model_name"
-      fi
-      if [[ -n "$RESUME_CHECKPOINT" ]]; then
-        export MECGE_RESUME_CHECKPOINT="$RESUME_CHECKPOINT"
-      fi
-      python3 main.py --n_type bw --nv "$nv" --config "$config_path" --device "$DEVICE"
+      cd "$APP_DIR"
+      python3 mecge_table1_run_official_reference.py \
+        --mecge-dir "$OFFICIAL_MECGE_DIR" \
+        --config "$config" \
+        --n-type bw \
+        --nv "$nv" \
+        --dataset-pkl "$pkl_file" \
+        --device "$DEVICE" \
+        --output-pkl "$official_generated" \
+        --checkpoint-dir "$checkpoint_run_dir" \
+        --log-dir "$log_run_dir" \
+        --max-epochs 50000 \
+        --early-stopping-patience 30 \
+        "${official_runner_args[@]}"
     )
   fi
 
@@ -517,7 +527,6 @@ run_mecge_pipeline_job() {
   fi
   mkdir -p "$(dirname "$official_out")"
   cp "$official_generated" "$official_out"
-  write_mecge_loss_artifacts "$checkpoint_run_dir"
   write_official_metrics "$official_out" "$result_model" "$model_name" "$exp_name"
 
   if [[ "$SKIP_ROBUSTNESS" != "1" ]]; then
@@ -541,19 +550,7 @@ run_mecge_pipeline_job() {
 run_official_mecge_for_nv() {
   local nv="$1"
   local pkl_file="$2"
-  run_mecge_pipeline_job "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
-}
-
-run_mecge_pipeline_family() {
-  local config="$1"
-  local result_model="$2"
-  local model_name="$3"
-  local seeds="$4"
-  local nv="$5"
-  local pkl_file="$6"
-  for seed in $seeds; do
-    run_mecge_pipeline_job "$config" "$result_model" "$model_name" "$seed" "$nv" "$pkl_file"
-  done
+  run_official_mecge_reference_job "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "3407" "$nv" "$pkl_file"
 }
 
 run_one_job() {
@@ -601,7 +598,7 @@ run_model_family() {
 MAIN_CONFIG="configs/mecge_table1_repro_mambattention_stfrft_dualpath_dapp_cfm_unet_bd.yaml"
 MAIN_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_cfm_unet_bd"
 MAIN_MODEL_NAME="mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg"
-MECGE_CONFIG="configs/mecge_table1_repro_mecg_e.yaml"
+MECGE_CONFIG="config/MECGE_phase.yaml"
 MECGE_RESULT_MODEL="mecg_e"
 MECGE_MODEL_NAME="mecg_e"
 MAMBATTENTION_CONFIG="configs/mecge_table1_repro_mambattention.yaml"
@@ -664,77 +661,77 @@ run_selected_models_for_nv() {
         exit 2
       fi
       run_official_mecge_for_nv "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$BASELINE_SENTRY_LITE_CONFIG" "$BASELINE_SENTRY_LITE_RESULT_MODEL" "$BASELINE_SENTRY_LITE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$BASELINE_SENTRY_FLOW_CONFIG" "$BASELINE_SENTRY_FLOW_RESULT_MODEL" "$BASELINE_SENTRY_FLOW_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$PHYSIO_FREQ_SENTRY_FLOW_CONFIG" "$PHYSIO_FREQ_SENTRY_FLOW_RESULT_MODEL" "$PHYSIO_FREQ_SENTRY_FLOW_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$MECGE_RESFLOW_LITE_CONFIG" "$MECGE_RESFLOW_LITE_RESULT_MODEL" "$MECGE_RESFLOW_LITE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_mecge_pipeline_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM" "$nv" "$pkl_file"
+      run_model_family "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$BASELINE_SENTRY_LITE_CONFIG" "$BASELINE_SENTRY_LITE_RESULT_MODEL" "$BASELINE_SENTRY_LITE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$BASELINE_SENTRY_FLOW_CONFIG" "$BASELINE_SENTRY_FLOW_RESULT_MODEL" "$BASELINE_SENTRY_FLOW_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$PHYSIO_FREQ_SENTRY_FLOW_CONFIG" "$PHYSIO_FREQ_SENTRY_FLOW_RESULT_MODEL" "$PHYSIO_FREQ_SENTRY_FLOW_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$MECGE_RESFLOW_LITE_CONFIG" "$MECGE_RESFLOW_LITE_RESULT_MODEL" "$MECGE_RESFLOW_LITE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_model_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM" "$nv" "$pkl_file"
       ;;
     main)
-      run_mecge_pipeline_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     mecge)
       run_official_mecge_for_nv "$nv" "$pkl_file"
       ;;
     mambattention)
-      run_mecge_pipeline_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd)
-      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd_step3)
-      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP3_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd_step4)
-      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd_step5)
-      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd_step8)
-      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention)
-      run_mecge_pipeline_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     stfrft)
-      run_mecge_pipeline_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     stable)
-      run_mecge_pipeline_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     baseline_sentry_lite)
-      run_mecge_pipeline_job "$BASELINE_SENTRY_LITE_CONFIG" "$BASELINE_SENTRY_LITE_RESULT_MODEL" "$BASELINE_SENTRY_LITE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$BASELINE_SENTRY_LITE_CONFIG" "$BASELINE_SENTRY_LITE_RESULT_MODEL" "$BASELINE_SENTRY_LITE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     baseline_sentry_flow)
-      run_mecge_pipeline_job "$BASELINE_SENTRY_FLOW_CONFIG" "$BASELINE_SENTRY_FLOW_RESULT_MODEL" "$BASELINE_SENTRY_FLOW_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$BASELINE_SENTRY_FLOW_CONFIG" "$BASELINE_SENTRY_FLOW_RESULT_MODEL" "$BASELINE_SENTRY_FLOW_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     physio_freq_sentry_flow)
-      run_mecge_pipeline_job "$PHYSIO_FREQ_SENTRY_FLOW_CONFIG" "$PHYSIO_FREQ_SENTRY_FLOW_RESULT_MODEL" "$PHYSIO_FREQ_SENTRY_FLOW_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$PHYSIO_FREQ_SENTRY_FLOW_CONFIG" "$PHYSIO_FREQ_SENTRY_FLOW_RESULT_MODEL" "$PHYSIO_FREQ_SENTRY_FLOW_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     mecge_resflow_lite)
-      run_mecge_pipeline_job "$MECGE_RESFLOW_LITE_CONFIG" "$MECGE_RESFLOW_LITE_RESULT_MODEL" "$MECGE_RESFLOW_LITE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$MECGE_RESFLOW_LITE_CONFIG" "$MECGE_RESFLOW_LITE_RESULT_MODEL" "$MECGE_RESFLOW_LITE_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     eddm_fm)
-      run_mecge_pipeline_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     eddm_fm_mamba)
-      run_mecge_pipeline_job "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     eddm_1shot)
-      run_mecge_pipeline_job "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_one_job "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
   esac
 }
