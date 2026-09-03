@@ -54,7 +54,16 @@ def main():
     resume_checkpoint = Path(args.resume_checkpoint).resolve() if args.resume_checkpoint else None
 
     os.chdir(mecge_dir)
-    sys.path.insert(0, str(mecge_dir))
+    wrapper_dir = Path(__file__).resolve().parent
+    sys.path = [
+        str(mecge_dir),
+        *[
+            path
+            for path in sys.path
+            if path and Path(path).resolve() != wrapper_dir
+        ],
+    ]
+    sys.modules.pop("models", None)
 
     from pipeline import train_dl, test_dl
 
