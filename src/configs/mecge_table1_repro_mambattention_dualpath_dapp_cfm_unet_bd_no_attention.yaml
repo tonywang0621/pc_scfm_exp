@@ -70,7 +70,7 @@ dataset:
 model:
   fea: "pha"
   norm: False
-  dense_channel: 64
+  dense_channel: 32
   compress_factor: 0.3
   num_tscblocks: 4
   d_state: 16
