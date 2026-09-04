@@ -60,7 +60,7 @@ Options:
   --resume              Resume training from training_state.pt for the selected run.
   --resume-checkpoint PATH
                         Resume training from an explicit training_state.pt path.
-  key=value             Extra OmegaConf override passed to train_supervised.py.
+  key=value             Extra OmegaConf override passed to the selected training runner.
 
 Environment overrides:
   SEEDS_MAIN="3407"
@@ -553,7 +553,7 @@ run_official_mecge_for_nv() {
   run_official_mecge_reference_job "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "3407" "$nv" "$pkl_file"
 }
 
-run_one_job() {
+run_official_local_model_job() {
   local config="$1"
   local result_model="$2"
   local model_name="$3"
@@ -563,24 +563,62 @@ run_one_job() {
   local exp_name="${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
   local result_pkl
   result_pkl="$(official_result_pkl "$result_model" "$nv" "$seed")"
-  echo "RUN job: model=$result_model seed=$seed nv=nv${nv}"
-  run_train "$config" "$result_model" "$model_name" "$seed" "$exp_name" "$pkl_file"
+  local checkpoint_run_dir="$RUN_ROOT/$result_model/checkpoint/$exp_name/$model_name"
+  local log_run_dir="$RUN_ROOT/$result_model/log/$exp_name/$model_name"
+  local runner_args=()
 
-  if [[ "$SKIP_TRAIN" != "1" ]]; then
-    (
-      cd "$APP_DIR"
-      python3 mecge_table1_export_local_result.py \
-        --config "$config" \
-        --checkpoint "$(checkpoint_path "$result_model" "$model_name" "$exp_name")" \
-        --pkl-file "$pkl_file" \
-        --output-pkl "$result_pkl" \
-        --batch-size 64 \
-        --device "$DEVICE"
-    )
-    write_official_metrics "$result_pkl" "$result_model" "$model_name" "$exp_name"
+  echo "RUN official-flow local job: model=$result_model seed=$seed nv=nv${nv}"
+  if [[ "$SKIP_TRAIN" == "1" ]]; then
+    runner_args+=(--skip-train)
+  fi
+  if [[ "$RESUME" == "1" ]]; then
+    runner_args+=(--resume)
+  fi
+  if [[ -n "$RESUME_CHECKPOINT" ]]; then
+    runner_args+=(--resume-checkpoint "$RESUME_CHECKPOINT")
   fi
 
+  if [[ "$RESUME" != "1" && "$FORCE_RERUN" != "1" && -f "$result_pkl" ]]; then
+    echo "Found existing official-flow local result for nv${nv}; skipping train/test: $result_pkl"
+  else
+    mkdir -p "$checkpoint_run_dir" "$log_run_dir" "$(dirname "$result_pkl")"
+    (
+      cd "$APP_DIR"
+      python3 mecge_table1_run_official_local_model.py \
+        --config "$config" \
+        --dataset-pkl "$pkl_file" \
+        --device "$DEVICE" \
+        --output-pkl "$result_pkl" \
+        --checkpoint-dir "$checkpoint_run_dir" \
+        --log-dir "$log_run_dir" \
+        --seed "$seed" \
+        "${runner_args[@]}" \
+        "${EXTRA_OVERRIDES[@]}"
+    )
+  fi
+
+  if [[ ! -f "$result_pkl" ]]; then
+    echo "Missing official-flow local result: $result_pkl" >&2
+    exit 1
+  fi
+  write_official_metrics "$result_pkl" "$result_model" "$model_name" "$exp_name"
   run_exp2_inference "$config" "$result_model" "$model_name" "$seed" "$exp_name" "$nv" "$pkl_file"
+}
+
+run_official_local_model_family() {
+  local config="$1"
+  local result_model="$2"
+  local model_name="$3"
+  local seeds="$4"
+  local nv="$5"
+  local pkl_file="$6"
+  for seed in $seeds; do
+    run_official_local_model_job "$config" "$result_model" "$model_name" "$seed" "$nv" "$pkl_file"
+  done
+}
+
+run_one_job() {
+  run_official_local_model_job "$@"
 }
 
 run_model_family() {
@@ -667,7 +705,7 @@ run_selected_models_for_nv() {
       run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP4_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP5_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
-      run_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
@@ -704,7 +742,7 @@ run_selected_models_for_nv() {
       run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_STEP8_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention)
-      run_one_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     stfrft)
       run_one_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
