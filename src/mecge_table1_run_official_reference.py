@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-checkpoint", default=None)
     parser.add_argument("--max-epochs", type=int, default=50000)
-    parser.add_argument("--early-stopping-patience", type=int, default=30)
+    parser.add_argument("--early-stopping-patience", default=30)
     parser.add_argument("--skip-train", action="store_true")
     return parser.parse_args()
 
@@ -87,7 +87,10 @@ def main():
         config = yaml.safe_load(handle)
     config.setdefault("train", {})
     config["train"]["epochs"] = args.max_epochs
-    config["train"]["early_stopping_patience_epochs"] = args.early_stopping_patience
+    if str(args.early_stopping_patience).lower() in {"none", "null", "false", "0"}:
+        config["train"]["early_stopping_patience_epochs"] = None
+    else:
+        config["train"]["early_stopping_patience_epochs"] = int(args.early_stopping_patience)
     config_name = config_path.stem
 
     with open(dataset_path, "rb") as handle:

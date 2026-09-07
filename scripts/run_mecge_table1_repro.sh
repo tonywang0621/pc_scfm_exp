@@ -45,7 +45,7 @@ Options:
   --rnd-test PATH        Official MECG-E rnd_test.npy for robustness bins.
   --prepare-raw          Recreate dataset_bw_nv*.pkl from raw QTDB/NSTDB before training.
   --device DEVICE       Training/inference device. Default: cuda:0
-  --model NAME          One of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd,
+  --model NAME          One of: all, mecge, mecge_no_early_stop, mambattention, dualpath_dapp_cfm_unet_bd,
                         dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4,
                         dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8,
                         dualpath_dapp_cfm_unet_bd_no_attention,
@@ -76,6 +76,7 @@ Environment overrides:
 Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model main --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model mecge --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mecge_no_early_stop --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model mambattention --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model dualpath_dapp_cfm_unet_bd_step3 --seed 3407 --nv 1 --device cuda:0
@@ -253,6 +254,9 @@ normalize_model() {
     mecge|mecg_e)
       printf '%s\n' "mecge"
       ;;
+    mecge_no_early_stop|mecg_e_no_early_stop|mecge_official_30epoch)
+      printf '%s\n' "mecge_no_early_stop"
+      ;;
     mambattention|mambattention_ecg)
       printf '%s\n' "mambattention"
       ;;
@@ -308,7 +312,7 @@ normalize_model() {
       printf '%s\n' "eddm_1shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, dualpath_dapp_cfm_unet_bd_no_attention_v2, stfrft, main, stable, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
+      echo "Unsupported --model '$1'. Expected one of: all, mecge, mecge_no_early_stop, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, dualpath_dapp_cfm_unet_bd_no_attention_v2, stfrft, main, stable, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
       exit 2
       ;;
   esac
@@ -478,6 +482,8 @@ run_official_mecge_reference_job() {
   local seed="$4"
   local nv="$5"
   local pkl_file="$6"
+  local max_epochs="${7:-50000}"
+  local early_stopping_patience="${8:-30}"
   local exp_name="${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
   local config_name
   config_name="$(basename "$config" .yaml)"
@@ -520,8 +526,8 @@ run_official_mecge_reference_job() {
         --output-pkl "$official_generated" \
         --checkpoint-dir "$checkpoint_run_dir" \
         --log-dir "$log_run_dir" \
-        --max-epochs 50000 \
-        --early-stopping-patience 30 \
+        --max-epochs "$max_epochs" \
+        --early-stopping-patience "$early_stopping_patience" \
         "${official_runner_args[@]}"
     )
   fi
@@ -556,6 +562,12 @@ run_official_mecge_for_nv() {
   local nv="$1"
   local pkl_file="$2"
   run_official_mecge_reference_job "$MECGE_CONFIG" "$MECGE_RESULT_MODEL" "$MECGE_MODEL_NAME" "3407" "$nv" "$pkl_file"
+}
+
+run_official_mecge_no_early_stop_for_nv() {
+  local nv="$1"
+  local pkl_file="$2"
+  run_official_mecge_reference_job "$MECGE_CONFIG" "$MECGE_NO_EARLY_STOP_RESULT_MODEL" "$MECGE_MODEL_NAME" "3407" "$nv" "$pkl_file" "30" "none"
 }
 
 run_official_local_model_job() {
@@ -643,6 +655,7 @@ MAIN_RESULT_MODEL="mambattention_stfrft_dualpath_dapp_cfm_unet_bd"
 MAIN_MODEL_NAME="mambattention_stfrft_dualpath_dapp_cfm_unet_bd_ecg"
 MECGE_CONFIG="config/MECGE_phase.yaml"
 MECGE_RESULT_MODEL="mecg_e"
+MECGE_NO_EARLY_STOP_RESULT_MODEL="mecg_e_no_early_stop"
 MECGE_MODEL_NAME="mecg_e"
 MAMBATTENTION_CONFIG="configs/mecge_table1_repro_mambattention.yaml"
 MAMBATTENTION_RESULT_MODEL="mambattention"
@@ -731,6 +744,9 @@ run_selected_models_for_nv() {
       ;;
     mecge)
       run_official_mecge_for_nv "$nv" "$pkl_file"
+      ;;
+    mecge_no_early_stop)
+      run_official_mecge_no_early_stop_for_nv "$nv" "$pkl_file"
       ;;
     mambattention)
       run_one_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"

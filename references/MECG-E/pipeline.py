@@ -203,7 +203,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
     val_loss_history = []
     start_epoch = 0
     patience = config['train'].get('early_stopping_patience_epochs', 30)
-    patience = int(patience)
+    patience = None if patience in {None, False, "none", "None", "null", "Null", 0} else int(patience)
     patience_counter = 0
     resume = os.environ.get("MECGE_RESUME", "0") == "1"
     if resume:
@@ -221,7 +221,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
         patience_counter = int(state.get("patience_counter", 0))
         start_epoch = int(state["epoch"]) + 1
         print(f"Resumed MECG-E training from {resume_checkpoint} at epoch {start_epoch}.")
-        if patience_counter >= patience:
+        if patience is not None and patience_counter >= patience:
             print(
                 "Resume checkpoint already reached early stopping patience "
                 f"({patience_counter}/{patience}); skipping training and running test."
@@ -285,7 +285,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
                 print("\n best loss is updated to ", current_valid_loss, "at", epoch_no,)
                 patience_counter = 0
                 _atomic_torch_save(model.state_dict(), model_filepath)
-            else:
+            elif patience is not None:
                 patience_counter += 1
                 print(f"No validation loss improvement. Patience: {patience_counter}/{patience}")
         if model_last_filepath:
@@ -302,7 +302,7 @@ def train_dl(Dataset, experiment, n_type, config, nv, tb_writer, valid_epoch_int
         )
         _write_validation_metrics(val_loss_history)
         _write_loss_artifacts(train_loss_history, val_loss_history)
-        if patience_counter >= patience:
+        if patience is not None and patience_counter >= patience:
             print(f"Early stopping triggered at epoch {epoch_no + 1}.")
             break
 
