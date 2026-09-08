@@ -459,7 +459,10 @@ class MECGECore(nn.Module):
 
         in_channel = 3 if self.phase_representation == "sincos" and self.fea == "pha" else 2
         self.dense_encoder = DenseEncoder(h, in_channel=in_channel)
-        self.tsc_blocks = nn.ModuleList([block_cls(h) for _ in range(h.num_tscblocks)])
+        if getattr(block_cls, "accepts_block_index", False):
+            self.tsc_blocks = nn.ModuleList([block_cls(h, block_index=i) for i in range(h.num_tscblocks)])
+        else:
+            self.tsc_blocks = nn.ModuleList([block_cls(h) for _ in range(h.num_tscblocks)])
         self.mask_decoder = MaskDecoder(h, out_channel=1)
 
         if self.fea == "cpx":

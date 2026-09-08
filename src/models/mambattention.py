@@ -25,11 +25,17 @@ class AttentionModule(nn.Module):
 
 
 class MambAttentionBlock(TSMambaBlock):
-    def __init__(self, h):
+    accepts_block_index = True
+
+    def __init__(self, h, block_index=None):
         super().__init__(h)
         self.use_time_attention = h.get("use_time_attention", True)
         self.use_freq_attention = h.get("use_freq_attention", True)
         self.attention_position = h.get("attention_position", "before_mamba")
+        attention_num_blocks = h.get("attention_num_blocks", None)
+        if attention_num_blocks is not None and block_index is not None and block_index >= int(attention_num_blocks):
+            self.use_time_attention = False
+            self.use_freq_attention = False
         if self.attention_position not in {"before_mamba", "after_mamba"}:
             raise ValueError(
                 "attention_position must be either 'before_mamba' or 'after_mamba'."
@@ -522,6 +528,30 @@ class UNetSelfAttention1d(nn.Module):
         return residual + attended.transpose(1, 2)
 
 
+class UNetDilatedConvMidBlock1d(nn.Module):
+    def __init__(self, channels, groups=8, dropout=0.0, dilations=(1, 2, 4, 8)):
+        super().__init__()
+        group_count = min(int(groups), int(channels))
+        while channels % group_count != 0:
+            group_count -= 1
+        layers = []
+        for dilation in dilations:
+            dilation = int(dilation)
+            layers.extend(
+                [
+                    nn.Conv1d(channels, channels, 3, padding=dilation, dilation=dilation),
+                    nn.GroupNorm(group_count, channels),
+                    nn.SiLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
+        layers.append(nn.Conv1d(channels, channels, 1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return x + self.net(x)
+
+
 class ConditionalResidualFlowUNetRefiner1d(nn.Module):
     def __init__(
         self,
@@ -535,6 +565,8 @@ class ConditionalResidualFlowUNetRefiner1d(nn.Module):
         dropout=0.0,
         pool_scales=(3, 5, 9, 15),
         attention_heads=4,
+        use_attention=True,
+        mid_dilations=(1, 2, 4, 8),
         aux_output_channels=0,
     ):
         super().__init__()
@@ -563,7 +595,15 @@ class ConditionalResidualFlowUNetRefiner1d(nn.Module):
             in_channels = out_channels
         self.first_skip_dapp = UNetDAPP1d(channels[0], pool_scales=pool_scales, use_global_pool=True)
         self.mid_block1 = UNetConvBlock1d(channels[-1], channels[-1], time_dim, groups=groups, dropout=dropout)
-        self.mid_attention = UNetSelfAttention1d(channels[-1], heads=attention_heads)
+        if use_attention:
+            self.mid_attention = UNetSelfAttention1d(channels[-1], heads=attention_heads)
+        else:
+            self.mid_attention = UNetDilatedConvMidBlock1d(
+                channels[-1],
+                groups=groups,
+                dropout=dropout,
+                dilations=mid_dilations,
+            )
         self.mid_block2 = UNetConvBlock1d(channels[-1], channels[-1], time_dim, groups=groups, dropout=dropout)
         self.ups = nn.ModuleList()
         current = channels[-1]
@@ -935,6 +975,8 @@ class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMamb
             dropout=float(h.get("cfm_dropout", 0.0)),
             pool_scales=tuple(h.get("cfm_unet_pool_scales", [3, 5, 9, 15])),
             attention_heads=int(h.get("cfm_unet_attention_heads", 4)),
+            use_attention=bool(h.get("cfm_unet_use_attention", True)),
+            mid_dilations=tuple(h.get("cfm_unet_mid_dilations", [1, 2, 4, 8])),
             aux_output_channels=self.cfm_unet_aux_channels,
         )
 
