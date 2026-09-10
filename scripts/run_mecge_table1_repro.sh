@@ -53,6 +53,8 @@ Options:
                         mambattention_dualpath_dapp_cfm_unet_bd_no_attention_bd_v3,
                         mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v3_100epoch_patience15,
                         mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15,
+                        mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20,
+                        mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20,
                         stfrft, main, stable, baseline_sentry_lite,
                         baseline_sentry_flow, physio_freq_sentry_flow,
                         mecge_resflow_lite,
@@ -91,6 +93,8 @@ Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model mambattention_dualpath_dapp_cfm_unet_bd_no_attention_bd_v3 --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v3_100epoch_patience15 --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15 --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20 --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20 --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stable --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 3407 --nv 1 --device cuda:0
@@ -296,6 +300,12 @@ normalize_model() {
     dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15|mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15"
       ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20|mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20|mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20"
+      ;;
     stfrft|mambattention_stfrft|mambattention_stfrft_ecg)
       printf '%s\n' "stfrft"
       ;;
@@ -327,7 +337,7 @@ normalize_model() {
       printf '%s\n' "eddm_1shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, mecge, mecge_no_early_stop, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, dualpath_dapp_cfm_unet_bd_no_attention_v2, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_bd_v3, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v3_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15, stfrft, main, stable, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
+      echo "Unsupported --model '$1'. Expected one of: all, mecge, mecge_no_early_stop, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, dualpath_dapp_cfm_unet_bd_no_attention_v2, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_bd_v3, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v3_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20, stfrft, main, stable, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
       exit 2
       ;;
   esac
@@ -705,6 +715,12 @@ DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V3_100E_P15_MODEL_NAME="mambattention_dua
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_CONFIG="configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15.yaml"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_RESULT_MODEL="mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_CONFIG="configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20.yaml"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_RESULT_MODEL="mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_CONFIG="configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20.yaml"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_RESULT_MODEL="mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_MODEL_NAME="mambattention_dualpath_dapp_cfm_unet_bd_ecg"
 STFRFT_CONFIG="configs/mecge_table1_repro_mambattention_stfrft.yaml"
 STFRFT_RESULT_MODEL="mambattention_stfrft"
 STFRFT_MODEL_NAME="mambattention_stfrft_ecg"
@@ -755,6 +771,8 @@ run_selected_models_for_nv() {
       run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_BD_V3_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_BD_V3_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_BD_V3_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V3_100E_P15_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V3_100E_P15_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V3_100E_P15_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
+      run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$STABLE_CONFIG" "$STABLE_RESULT_MODEL" "$STABLE_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
@@ -807,6 +825,12 @@ run_selected_models_for_nv() {
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15)
       run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4B_100E_P15_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20)
+      run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V4C_BASELINE_150E_P20_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20)
+      run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V5_CONVCTX_150E_P20_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     stfrft)
       run_one_job "$STFRFT_CONFIG" "$STFRFT_RESULT_MODEL" "$STFRFT_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"

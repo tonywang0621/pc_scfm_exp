@@ -24,6 +24,32 @@ class AttentionModule(nn.Module):
         return out
 
 
+class SequenceDilatedConvModule(nn.Module):
+    def __init__(self, dim, kernel_size=5, dilations=(1, 2, 4), dropout=0.0):
+        super().__init__()
+        self.layernorm = nn.LayerNorm(dim)
+        layers = []
+        for dilation in dilations:
+            dilation = int(dilation)
+            padding = (int(kernel_size) // 2) * dilation
+            layers.extend(
+                [
+                    nn.Conv1d(dim, dim, kernel_size, padding=padding, dilation=dilation, groups=dim),
+                    nn.Conv1d(dim, dim, 1),
+                    nn.GELU(),
+                    nn.Dropout(dropout),
+                ]
+            )
+        self.net = nn.Sequential(*layers)
+        self.out = nn.Conv1d(dim, dim, 1)
+
+    def forward(self, x):
+        residual = x
+        x = self.layernorm(x).transpose(1, 2)
+        x = self.out(self.net(x)).transpose(1, 2)
+        return x + residual
+
+
 class MambAttentionBlock(TSMambaBlock):
     accepts_block_index = True
 
@@ -40,26 +66,42 @@ class MambAttentionBlock(TSMambaBlock):
             raise ValueError(
                 "attention_position must be either 'before_mamba' or 'after_mamba'."
             )
-        self.attention = AttentionModule(
-            dim=h.dense_channel,
-            n_head=h.get("attention_heads", 8),
-            dropout=h.get("attention_dropout", 0.0),
-        )
+        self.context_replacement = h.get("attention_replacement", "attention")
+        if self.context_replacement not in {"attention", "dilated_conv"}:
+            raise ValueError("attention_replacement must be either 'attention' or 'dilated_conv'.")
+        if self.context_replacement == "attention":
+            self.attention = AttentionModule(
+                dim=h.dense_channel,
+                n_head=h.get("attention_heads", 8),
+                dropout=h.get("attention_dropout", 0.0),
+            )
+        else:
+            self.sequence_context = SequenceDilatedConvModule(
+                dim=h.dense_channel,
+                kernel_size=h.get("attention_conv_kernel_size", 5),
+                dilations=tuple(h.get("attention_conv_dilations", [1, 2, 4])),
+                dropout=h.get("attention_conv_dropout", h.get("attention_dropout", 0.0)),
+            )
+
+    def _context(self, x):
+        if self.context_replacement == "dilated_conv":
+            return self.sequence_context(x)
+        return self.attention(x) + x
 
     def forward(self, x):
         b, c, t, f = x.size()
         x = x.permute(0, 3, 2, 1).contiguous().view(b * f, t, c)
         if self.use_time_attention and self.attention_position == "before_mamba":
-            x = self.attention(x) + x
+            x = self._context(x)
         x = self.tlinear(self.time_mamba(x).permute(0, 2, 1)).permute(0, 2, 1) + x
         if self.use_time_attention and self.attention_position == "after_mamba":
-            x = self.attention(x) + x
+            x = self._context(x)
         x = x.view(b, f, t, c).permute(0, 2, 1, 3).contiguous().view(b * t, f, c)
         if self.use_freq_attention and self.attention_position == "before_mamba":
-            x = self.attention(x) + x
+            x = self._context(x)
         x = self.flinear(self.freq_mamba(x).permute(0, 2, 1)).permute(0, 2, 1) + x
         if self.use_freq_attention and self.attention_position == "after_mamba":
-            x = self.attention(x) + x
+            x = self._context(x)
         return x.view(b, t, f, c).permute(0, 3, 1, 2)
 
 
