@@ -50,6 +50,105 @@ class SequenceDilatedConvModule(nn.Module):
         return x + residual
 
 
+class ResidualDilatedConvModule(nn.Module):
+    def __init__(self, dim, kernel_size=7, dilations=(1, 2, 4, 8), dropout=0.0):
+        super().__init__()
+        self.layernorm = nn.LayerNorm(dim)
+        self.blocks = nn.ModuleList()
+        for dilation in dilations:
+            dilation = int(dilation)
+            padding = (int(kernel_size) // 2) * dilation
+            self.blocks.append(
+                nn.Sequential(
+                    nn.Conv1d(dim, dim, kernel_size, padding=padding, dilation=dilation, groups=dim),
+                    nn.Conv1d(dim, dim * 2, 1),
+                    nn.GLU(dim=1),
+                    nn.Dropout(dropout),
+                    nn.Conv1d(dim, dim, 1),
+                )
+            )
+        self.out = nn.Conv1d(dim, dim, 1)
+        self.res_scale = nn.Parameter(torch.tensor(0.25))
+
+    def forward(self, x):
+        residual = x
+        x = self.layernorm(x).transpose(1, 2)
+        for block in self.blocks:
+            x = x + block(x)
+        x = self.out(x).transpose(1, 2)
+        return residual + torch.sigmoid(self.res_scale) * x
+
+
+class LightweightLSTMContextBlock(nn.Module):
+    accepts_block_index = True
+
+    def __init__(self, h, block_index=None):
+        super().__init__()
+        dim = int(h.dense_channel)
+        hidden = int(h.get("lstm_hidden", max(8, dim // 2)))
+        dropout = float(h.get("lstm_dropout", 0.05))
+        self.use_time_context = h.get("use_time_attention", True)
+        self.use_freq_context = h.get("use_freq_attention", True)
+        context_num_blocks = h.get("attention_num_blocks", None)
+        if context_num_blocks is not None and block_index is not None and block_index >= int(context_num_blocks):
+            self.use_time_context = False
+            self.use_freq_context = False
+        self.context_position = h.get("attention_position", "before_mamba")
+        if self.context_position not in {"before_mamba", "after_mamba"}:
+            raise ValueError("attention_position must be either 'before_mamba' or 'after_mamba'.")
+
+        self.context = ResidualDilatedConvModule(
+            dim=dim,
+            kernel_size=h.get("attention_conv_kernel_size", 7),
+            dilations=tuple(h.get("attention_conv_dilations", [1, 2, 4, 8])),
+            dropout=h.get("attention_conv_dropout", h.get("attention_dropout", 0.02)),
+        )
+        self.time_norm = nn.LayerNorm(dim)
+        self.freq_norm = nn.LayerNorm(dim)
+        self.time_lstm = nn.LSTM(
+            input_size=dim,
+            hidden_size=hidden,
+            num_layers=1,
+            dropout=0.0,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.freq_lstm = nn.LSTM(
+            input_size=dim,
+            hidden_size=hidden,
+            num_layers=1,
+            dropout=0.0,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.time_proj = nn.Linear(hidden * 2, dim)
+        self.freq_proj = nn.Linear(hidden * 2, dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def _run_lstm(self, x, norm, lstm, proj):
+        residual = x
+        x, _ = lstm(norm(x))
+        x = self.dropout(proj(x))
+        return residual + x
+
+    def forward(self, x):
+        b, c, t, f = x.size()
+        x = x.permute(0, 3, 2, 1).contiguous().view(b * f, t, c)
+        if self.use_time_context and self.context_position == "before_mamba":
+            x = self.context(x)
+        x = self._run_lstm(x, self.time_norm, self.time_lstm, self.time_proj)
+        if self.use_time_context and self.context_position == "after_mamba":
+            x = self.context(x)
+
+        x = x.view(b, f, t, c).permute(0, 2, 1, 3).contiguous().view(b * t, f, c)
+        if self.use_freq_context and self.context_position == "before_mamba":
+            x = self.context(x)
+        x = self._run_lstm(x, self.freq_norm, self.freq_lstm, self.freq_proj)
+        if self.use_freq_context and self.context_position == "after_mamba":
+            x = self.context(x)
+        return x.view(b, t, f, c).permute(0, 3, 1, 2)
+
+
 class MambAttentionBlock(TSMambaBlock):
     accepts_block_index = True
 
@@ -67,13 +166,22 @@ class MambAttentionBlock(TSMambaBlock):
                 "attention_position must be either 'before_mamba' or 'after_mamba'."
             )
         self.context_replacement = h.get("attention_replacement", "attention")
-        if self.context_replacement not in {"attention", "dilated_conv"}:
-            raise ValueError("attention_replacement must be either 'attention' or 'dilated_conv'.")
+        if self.context_replacement not in {"attention", "dilated_conv", "residual_dilated_conv"}:
+            raise ValueError(
+                "attention_replacement must be 'attention', 'dilated_conv', or 'residual_dilated_conv'."
+            )
         if self.context_replacement == "attention":
             self.attention = AttentionModule(
                 dim=h.dense_channel,
                 n_head=h.get("attention_heads", 8),
                 dropout=h.get("attention_dropout", 0.0),
+            )
+        elif self.context_replacement == "residual_dilated_conv":
+            self.sequence_context = ResidualDilatedConvModule(
+                dim=h.dense_channel,
+                kernel_size=h.get("attention_conv_kernel_size", 7),
+                dilations=tuple(h.get("attention_conv_dilations", [1, 2, 4, 8])),
+                dropout=h.get("attention_conv_dropout", h.get("attention_dropout", 0.0)),
             )
         else:
             self.sequence_context = SequenceDilatedConvModule(
@@ -84,7 +192,7 @@ class MambAttentionBlock(TSMambaBlock):
             )
 
     def _context(self, x):
-        if self.context_replacement == "dilated_conv":
+        if self.context_replacement in {"dilated_conv", "residual_dilated_conv"}:
             return self.sequence_context(x)
         return self.attention(x) + x
 
@@ -1590,6 +1698,13 @@ class MambAttentionDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
     MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
 ):
     pass
+
+
+@register_model("lstm_dualpath_dapp_cfm_unet_bd_ecg")
+class LSTMDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
+    MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+):
+    block_cls = LightweightLSTMContextBlock
 
 
 @register_model("mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg")
