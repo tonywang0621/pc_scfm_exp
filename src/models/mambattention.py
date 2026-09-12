@@ -149,6 +149,78 @@ class LightweightLSTMContextBlock(nn.Module):
         return x.view(b, t, f, c).permute(0, 3, 1, 2)
 
 
+class LightweightBiGRUContextBlock(nn.Module):
+    accepts_block_index = True
+
+    def __init__(self, h, block_index=None):
+        super().__init__()
+        dim = int(h.dense_channel)
+        hidden = int(h.get("bigru_hidden", h.get("gru_hidden", h.get("lstm_hidden", max(8, dim // 2)))))
+        dropout = float(h.get("bigru_dropout", h.get("gru_dropout", h.get("lstm_dropout", 0.05))))
+        num_layers = int(h.get("bigru_layers", h.get("gru_layers", 1)))
+        rnn_dropout = dropout if num_layers > 1 else 0.0
+        self.use_time_context = h.get("use_time_attention", True)
+        self.use_freq_context = h.get("use_freq_attention", True)
+        context_num_blocks = h.get("attention_num_blocks", None)
+        if context_num_blocks is not None and block_index is not None and block_index >= int(context_num_blocks):
+            self.use_time_context = False
+            self.use_freq_context = False
+        self.context_position = h.get("attention_position", "before_mamba")
+        if self.context_position not in {"before_mamba", "after_mamba"}:
+            raise ValueError("attention_position must be either 'before_mamba' or 'after_mamba'.")
+
+        self.context = ResidualDilatedConvModule(
+            dim=dim,
+            kernel_size=h.get("attention_conv_kernel_size", 7),
+            dilations=tuple(h.get("attention_conv_dilations", [1, 2, 4, 8])),
+            dropout=h.get("attention_conv_dropout", h.get("attention_dropout", 0.02)),
+        )
+        self.time_norm = nn.LayerNorm(dim)
+        self.freq_norm = nn.LayerNorm(dim)
+        self.time_gru = nn.GRU(
+            input_size=dim,
+            hidden_size=hidden,
+            num_layers=num_layers,
+            dropout=rnn_dropout,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.freq_gru = nn.GRU(
+            input_size=dim,
+            hidden_size=hidden,
+            num_layers=num_layers,
+            dropout=rnn_dropout,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.time_proj = nn.Linear(hidden * 2, dim)
+        self.freq_proj = nn.Linear(hidden * 2, dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def _run_gru(self, x, norm, gru, proj):
+        residual = x
+        x, _ = gru(norm(x))
+        x = self.dropout(proj(x))
+        return residual + x
+
+    def forward(self, x):
+        b, c, t, f = x.size()
+        x = x.permute(0, 3, 2, 1).contiguous().view(b * f, t, c)
+        if self.use_time_context and self.context_position == "before_mamba":
+            x = self.context(x)
+        x = self._run_gru(x, self.time_norm, self.time_gru, self.time_proj)
+        if self.use_time_context and self.context_position == "after_mamba":
+            x = self.context(x)
+
+        x = x.view(b, f, t, c).permute(0, 2, 1, 3).contiguous().view(b * t, f, c)
+        if self.use_freq_context and self.context_position == "before_mamba":
+            x = self.context(x)
+        x = self._run_gru(x, self.freq_norm, self.freq_gru, self.freq_proj)
+        if self.use_freq_context and self.context_position == "after_mamba":
+            x = self.context(x)
+        return x.view(b, t, f, c).permute(0, 3, 1, 2)
+
+
 class MambAttentionBlock(TSMambaBlock):
     accepts_block_index = True
 
@@ -1705,6 +1777,13 @@ class LSTMDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
     MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
 ):
     block_cls = LightweightLSTMContextBlock
+
+
+@register_model("bigru_dualpath_dapp_cfm_unet_bd_ecg")
+class BiGRUDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
+    MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+):
+    block_cls = LightweightBiGRUContextBlock
 
 
 @register_model("mambattention_stfrft_dualpath_dapp_stable_cfm_unet_ecg")

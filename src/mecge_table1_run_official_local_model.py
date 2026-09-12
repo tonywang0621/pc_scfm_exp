@@ -226,7 +226,7 @@ def train_model(model, train_loader, val_loader, args, checkpoint_dir, writer):
         patience_counter = int(state.get("patience_counter", 0))
         start_epoch = int(state["epoch"]) + 1
         print(f"Resumed local official-flow training from {resume_checkpoint} at epoch {start_epoch}.")
-        if patience_counter >= args.patience:
+        if args.patience > 0 and patience_counter >= args.patience:
             print(
                 "Resume checkpoint already reached early stopping patience "
             f"({patience_counter}/{args.patience}); skipping training and running test."
@@ -289,7 +289,10 @@ def train_model(model, train_loader, val_loader, args, checkpoint_dir, writer):
             atomic_torch_save(model.state_dict(), model_filepath)
         else:
             patience_counter += 1
-            print(f"No validation loss improvement. Patience: {patience_counter}/{args.patience}")
+            if args.patience > 0:
+                print(f"No validation loss improvement. Patience: {patience_counter}/{args.patience}")
+            else:
+                print("No validation loss improvement. Early stopping disabled.")
 
         atomic_torch_save(model.state_dict(), model_last_filepath)
         save_training_state(
@@ -304,7 +307,7 @@ def train_model(model, train_loader, val_loader, args, checkpoint_dir, writer):
             val_loss_history,
         )
         write_loss_history(checkpoint_dir, train_loss_history, val_loss_history)
-        if patience_counter >= args.patience:
+        if args.patience > 0 and patience_counter >= args.patience:
             print(f"Early stopping triggered at epoch {epoch_no + 1}.")
             break
 
