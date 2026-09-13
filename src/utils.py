@@ -328,11 +328,91 @@ def get_reconstruction_metric_summary(model, test_loader, device, fs=250, low_fr
     )
 
 
+def _parameter_is_under(name, prefixes):
+    return any(name == prefix or name.startswith(prefix + ".") for prefix in prefixes)
+
+
+def _inactive_parameter_prefixes(model):
+    prefixes = []
+    for module_name, module in model.named_modules():
+        prefix = f"{module_name}." if module_name else ""
+
+        if hasattr(module, "h") and hasattr(module.h, "get") and not module.h.get("fmamba", True):
+            prefixes.extend([prefix + "freq_mamba", prefix + "flinear"])
+
+        if hasattr(module, "use_time_attention") and hasattr(module, "use_freq_attention"):
+            freq_active = bool(module.use_freq_attention)
+            if hasattr(module, "h") and hasattr(module.h, "get"):
+                freq_active = freq_active and bool(module.h.get("fmamba", True))
+            if not bool(module.use_time_attention) and not freq_active:
+                prefixes.extend([prefix + "attention", prefix + "sequence_context"])
+
+        if hasattr(module, "use_time_context") and hasattr(module, "use_freq_context"):
+            if not bool(module.use_time_context) and not bool(module.use_freq_context):
+                prefixes.append(prefix + "context")
+    return tuple(prefixes)
+
+
+def _partial_active_parameter_numel(name, param, module_lookup):
+    for module_name, module in module_lookup.items():
+        if not (
+            hasattr(module, "aux_output_channels")
+            and hasattr(module, "output_channels")
+            and hasattr(module, "output")
+        ):
+            continue
+        output_prefix = f"{module_name}.output." if module_name else "output."
+        if not name.startswith(output_prefix):
+            continue
+
+        owner_name = module_name.rsplit(".residual_flow", 1)[0] if module_name.endswith(".residual_flow") else module_name
+        owner = module_lookup.get(owner_name, module)
+        lambda_ecg = float(getattr(owner, "lambda_ecg_noise_aux", 0.0))
+        lambda_gaussian = float(getattr(owner, "lambda_gaussian_noise_aux", 0.0))
+        loss_fn = getattr(owner, "loss_fn", [])
+        active_aux_channels = (
+            int(getattr(module, "aux_output_channels", 0))
+            if "noise_aux" in loss_fn and lambda_ecg + lambda_gaussian > 0
+            else 0
+        )
+        active_out_channels = int(getattr(module, "output_channels", 0)) + active_aux_channels
+        if active_out_channels <= 0 or param.ndim == 0 or param.shape[0] <= active_out_channels:
+            return None
+        return int(param[:active_out_channels].numel())
+    return None
+
+
+def _count_model_parameters(model):
+    registered_params = sum(param.numel() for param in model.parameters())
+    registered_trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
+    state_dict_tensors = sum(tensor.numel() for tensor in model.state_dict().values())
+    inactive_prefixes = _inactive_parameter_prefixes(model)
+    module_lookup = dict(model.named_modules())
+    active_params = 0
+    active_trainable_params = 0
+
+    for name, param in model.named_parameters():
+        if _parameter_is_under(name, inactive_prefixes):
+            continue
+        active_numel = _partial_active_parameter_numel(name, param, module_lookup)
+        if active_numel is None:
+            active_numel = param.numel()
+        active_params += active_numel
+        if param.requires_grad:
+            active_trainable_params += active_numel
+
+    return (
+        active_params,
+        active_trainable_params,
+        registered_params,
+        registered_trainable_params,
+        state_dict_tensors,
+    )
+
+
 def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5, repeats=20):
     model.eval()
     dummy = torch.zeros(batch_size, 1, input_length, device=device)
-    params = sum(param.numel() for param in model.parameters())
-    trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
 
     flops = float("nan")
     try:
@@ -346,6 +426,16 @@ def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5
         for module in model.modules():
             module._buffers.pop("total_ops", None)
             module._buffers.pop("total_params", None)
+
+    with torch.no_grad():
+        _ = model(dummy)
+    (
+        params,
+        trainable_params,
+        registered_params,
+        registered_trainable_params,
+        state_dict_tensors,
+    ) = _count_model_parameters(model)
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -369,6 +459,9 @@ def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5
     return {
         "Parameters": float(params),
         "Trainable_Parameters": float(trainable_params),
+        "Registered_Parameters": float(registered_params),
+        "Registered_Trainable_Parameters": float(registered_trainable_params),
+        "State_Dict_Tensor_Elements": float(state_dict_tensors),
         "FLOPs": flops,
         "Inference_Time_ms": float(elapsed / repeats * 1000.0),
         "Peak_Memory_MB": float(peak_memory_mb),

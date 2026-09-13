@@ -19,10 +19,11 @@ Usage:
   bash scripts/run_mecge_table1_complexity_test.sh [options]
 
 Options:
-  --model NAME          One of: all, mecge, mambattention, dualpath_dapp_cfm_unet_bd,
+  --model NAME          One of: all, mecge, mecge_no_early_stop, mambattention, dualpath_dapp_cfm_unet_bd,
                         dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4,
                         dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8,
                         dualpath_dapp_cfm_unet_bd_no_attention,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience,
                         stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
   --output-root PATH    Output directory. Default:
                         /work/tonyalpha1/pc_scfm_exp/runs/mecge_table1_repro/complexity_test
@@ -94,6 +95,9 @@ normalize_model() {
     mecge|mecg_e)
       printf '%s\n' "mecge"
       ;;
+    mecge_no_early_stop|mecg_e_no_early_stop|mecge_official_30epoch)
+      printf '%s\n' "mecge_no_early_stop"
+      ;;
     mambattention|mambattention_ecg)
       printf '%s\n' "mambattention"
       ;;
@@ -114,6 +118,9 @@ normalize_model() {
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention|mambattention_dualpath_dapp_cfm_unet_bd_no_attention)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention"
+      ;;
+    lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience|dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience)
+      printf '%s\n' "lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience"
       ;;
     stfrft|mambattention_stfrft|mambattention_stfrft_ecg)
       printf '%s\n' "stfrft"
@@ -146,6 +153,9 @@ config_for_model() {
     mecge)
       printf '%s\n' "configs/mecge_table1_repro_mecg_e.yaml"
       ;;
+    mecge_no_early_stop)
+      printf '%s\n' "configs/mecge_table1_repro_mecg_e.yaml"
+      ;;
     mambattention)
       printf '%s\n' "configs/mecge_table1_repro_mambattention.yaml"
       ;;
@@ -166,6 +176,9 @@ config_for_model() {
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention)
       printf '%s\n' "configs/mecge_table1_repro_mambattention_dualpath_dapp_cfm_unet_bd_no_attention.yaml"
+      ;;
+    lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience)
+      printf '%s\n' "configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience.yaml"
       ;;
     stfrft)
       printf '%s\n' "configs/mecge_table1_repro_mambattention_stfrft.yaml"
@@ -217,6 +230,7 @@ TARGET_MODEL="$(normalize_model "$TARGET_MODEL")"
 if [[ "$TARGET_MODEL" == "all" ]]; then
   MODELS=(
     mecge
+    mecge_no_early_stop
     mambattention
     dualpath_dapp_cfm_unet_bd
     dualpath_dapp_cfm_unet_bd_step3
@@ -224,6 +238,7 @@ if [[ "$TARGET_MODEL" == "all" ]]; then
     dualpath_dapp_cfm_unet_bd_step5
     dualpath_dapp_cfm_unet_bd_step8
     dualpath_dapp_cfm_unet_bd_no_attention
+    lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience
     stfrft
     main
     stable
