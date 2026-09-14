@@ -413,6 +413,12 @@ def _count_model_parameters(model):
 def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5, repeats=20):
     model.eval()
     dummy = torch.zeros(batch_size, 1, input_length, device=device)
+    shot_count = int(getattr(model, "num_shots", 1))
+
+    def inference_call(x):
+        if hasattr(model, "denoising_shots") and shot_count > 1:
+            return model.denoising_shots(x).mean(dim=0)
+        return model(x)
 
     flops = float("nan")
     try:
@@ -420,6 +426,8 @@ def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5
 
         flops, _ = profile(model, inputs=(dummy,), verbose=False)
         flops = float(flops)
+        if hasattr(model, "denoising_shots") and shot_count > 1:
+            flops *= float(shot_count)
     except Exception:
         pass
     finally:
@@ -428,7 +436,7 @@ def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5
             module._buffers.pop("total_params", None)
 
     with torch.no_grad():
-        _ = model(dummy)
+        _ = inference_call(dummy)
     (
         params,
         trainable_params,
@@ -443,12 +451,12 @@ def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5
 
     with torch.no_grad():
         for _ in range(warmup):
-            _ = model(dummy)
+            _ = inference_call(dummy)
         if device.type == "cuda":
             torch.cuda.synchronize(device)
         start = time.perf_counter()
         for _ in range(repeats):
-            _ = model(dummy)
+            _ = inference_call(dummy)
         if device.type == "cuda":
             torch.cuda.synchronize(device)
         elapsed = time.perf_counter() - start

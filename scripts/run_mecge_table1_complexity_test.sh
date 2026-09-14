@@ -24,7 +24,8 @@ Options:
                         dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8,
                         dualpath_dapp_cfm_unet_bd_no_attention,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience,
-                        stfrft, main, stable, eddm_fm, eddm_fm_mamba, eddm_1shot.
+                        stfrft, main, stable, eddm_fm, eddm_fm_mamba,
+                        eddm_1shot, eddm_3shot, eddm_5shot, eddm_10shot.
   --output-root PATH    Output directory. Default:
                         /work/tonyalpha1/pc_scfm_exp/runs/mecge_table1_repro/complexity_test
   --device DEVICE       Profiling device. Default: cuda:0
@@ -137,8 +138,17 @@ normalize_model() {
     eddm_fm_mamba|eddm_flow_matching_mamba)
       printf '%s\n' "eddm_fm_mamba"
       ;;
-    eddm|eddm_1shot)
+    eddm|eddm_1shot|eddm-1|eddm_1)
       printf '%s\n' "eddm_1shot"
+      ;;
+    eddm_3shot|eddm-3|eddm_3)
+      printf '%s\n' "eddm_3shot"
+      ;;
+    eddm_5shot|eddm-5|eddm_5)
+      printf '%s\n' "eddm_5shot"
+      ;;
+    eddm_10shot|eddm-10|eddm_10)
+      printf '%s\n' "eddm_10shot"
       ;;
     *)
       echo "Unsupported --model '$1'." >&2
@@ -195,8 +205,22 @@ config_for_model() {
     eddm_fm_mamba)
       printf '%s\n' "configs/mecge_table1_repro_eddm_flow_matching_mamba.yaml"
       ;;
-    eddm_1shot)
+    eddm_1shot|eddm_3shot|eddm_5shot|eddm_10shot)
       printf '%s\n' "configs/mecge_table1_repro_eddm_1shot.yaml"
+      ;;
+  esac
+}
+
+overrides_for_model() {
+  case "$1" in
+    eddm_3shot)
+      printf '%s\n' "model.num_shots=3"
+      ;;
+    eddm_5shot)
+      printf '%s\n' "model.num_shots=5"
+      ;;
+    eddm_10shot)
+      printf '%s\n' "model.num_shots=10"
       ;;
   esac
 }
@@ -205,6 +229,11 @@ run_complexity() {
   local model_key="$1"
   local config
   config="$(config_for_model "$model_key")"
+  local overrides=()
+  local override
+  while IFS= read -r override; do
+    [[ -n "$override" ]] && overrides+=("$override")
+  done < <(overrides_for_model "$model_key")
   local output_yaml="$OUTPUT_ROOT/${model_key}_complexity_test.yaml"
   if [[ "$FORCE" != "1" && -f "$output_yaml" ]]; then
     echo "SKIP complexity: $model_key: existing $output_yaml"
@@ -221,7 +250,8 @@ run_complexity() {
       --batch-size "$BATCH_SIZE" \
       --input-length "$INPUT_LENGTH" \
       --warmup "$WARMUP" \
-      --repeats "$REPEATS"
+      --repeats "$REPEATS" \
+      "${overrides[@]}"
   )
 }
 
@@ -245,6 +275,9 @@ if [[ "$TARGET_MODEL" == "all" ]]; then
     eddm_fm
     eddm_fm_mamba
     eddm_1shot
+    eddm_3shot
+    eddm_5shot
+    eddm_10shot
   )
 else
   MODELS=("$TARGET_MODEL")

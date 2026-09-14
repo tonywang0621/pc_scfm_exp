@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeats", type=int, default=20)
     parser.add_argument("--model-key", default=None)
+    parser.add_argument("overrides", nargs="*")
     return parser.parse_args()
 
 
@@ -35,7 +36,7 @@ def normalize_yaml_values(values):
 
 def main():
     args = parse_args()
-    cfg = OmegaConf.load(args.config)
+    cfg = OmegaConf.merge(OmegaConf.load(args.config), OmegaConf.from_dotlist(args.overrides))
     device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
     model = get_model(cfg.model_name, **OmegaConf.to_container(cfg.model, resolve=True)).to(device)
     input_length = args.input_length or int(cfg.dataset.get("window_size", 512))
@@ -52,6 +53,7 @@ def main():
         "model_key": args.model_key,
         "model_name": str(cfg.model_name),
         "config": str(args.config),
+        "overrides": list(args.overrides),
         "input_length": int(input_length),
         "batch_size": int(args.batch_size),
         "device": str(device),
