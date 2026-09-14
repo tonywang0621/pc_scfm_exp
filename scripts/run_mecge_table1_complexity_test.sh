@@ -7,6 +7,7 @@ DESCOD_DIR="${DESCOD_DIR:-$ROOT_DIR/references/Score-based-ECG-Denoising}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/work/tonyalpha1/pc_scfm_exp/runs/mecge_table1_repro/complexity_test}"
 DEVICE="${DEVICE:-cuda:0}"
+INCLUDE_CPU="${INCLUDE_CPU:-1}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 INPUT_LENGTH="${INPUT_LENGTH:-512}"
 WARMUP="${WARMUP:-5}"
@@ -30,7 +31,10 @@ Options:
                         descod_1shot, descod_3shot, descod_5shot, descod_10shot.
   --output-root PATH    Output directory. Default:
                         /work/tonyalpha1/pc_scfm_exp/runs/mecge_table1_repro/complexity_test
-  --device DEVICE       Profiling device. Default: cuda:0
+  --device DEVICE       Primary profiling device. Default: cuda:0
+                        By default the script also profiles cpu and writes both
+                        gpu/cpu sections into the same output YAML.
+  --no-cpu              Only profile the primary device.
   --batch-size N        Dummy input batch size. Default: 1
   --input-length N      Dummy ECG window length. Default: 512
   --warmup N            Latency warmup repeats. Default: 5
@@ -57,6 +61,10 @@ while [[ $# -gt 0 ]]; do
     --device)
       DEVICE="$2"
       shift 2
+      ;;
+    --no-cpu)
+      INCLUDE_CPU=0
+      shift
       ;;
     --batch-size)
       BATCH_SIZE="$2"
@@ -256,13 +264,42 @@ descod_shots_for_model() {
   esac
 }
 
+profile_device_label() {
+  case "$DEVICE" in
+    cuda*)
+      printf '%s\n' "gpu"
+      ;;
+    *)
+      printf '%s\n' "cpu"
+      ;;
+  esac
+}
+
+complexity_output_complete() {
+  local output_yaml="$1"
+  [[ -f "$output_yaml" ]] || return 1
+  local primary_label
+  primary_label="$(profile_device_label)"
+  grep -q "^${primary_label}:" "$output_yaml" || return 1
+  if [[ "$INCLUDE_CPU" == "1" && "$primary_label" != "cpu" ]]; then
+    grep -q "^cpu:" "$output_yaml" || return 1
+  fi
+  return 0
+}
+
+cpu_profile_args() {
+  if [[ "$INCLUDE_CPU" == "1" && "$(profile_device_label)" != "cpu" ]]; then
+    printf '%s\n' "--include-cpu"
+  fi
+}
+
 run_complexity() {
   local model_key="$1"
   local descod_shots
   descod_shots="$(descod_shots_for_model "$model_key")"
   if [[ -n "$descod_shots" ]]; then
     local output_yaml="$OUTPUT_ROOT/${model_key}_complexity_test.yaml"
-    if [[ "$FORCE" != "1" && -f "$output_yaml" ]]; then
+    if [[ "$FORCE" != "1" ]] && complexity_output_complete "$output_yaml"; then
       echo "SKIP complexity: $model_key: existing $output_yaml"
       return 0
     fi
@@ -271,6 +308,11 @@ run_complexity() {
       exit 1
     fi
     echo "RUN complexity: $model_key -> $output_yaml"
+    local include_args=()
+    local include_arg
+    while IFS= read -r include_arg; do
+      [[ -n "$include_arg" ]] && include_args+=("$include_arg")
+    done < <(cpu_profile_args)
     (
       cd "$APP_DIR"
       python3 profile_reference_descod_complexity.py \
@@ -279,6 +321,7 @@ run_complexity() {
         --model-key "$model_key" \
         --num-shots "$descod_shots" \
         --device "$DEVICE" \
+        "${include_args[@]}" \
         --batch-size "$BATCH_SIZE" \
         --input-length "$INPUT_LENGTH" \
         --warmup "$WARMUP" \
@@ -295,11 +338,16 @@ run_complexity() {
     [[ -n "$override" ]] && overrides+=("$override")
   done < <(overrides_for_model "$model_key")
   local output_yaml="$OUTPUT_ROOT/${model_key}_complexity_test.yaml"
-  if [[ "$FORCE" != "1" && -f "$output_yaml" ]]; then
+  if [[ "$FORCE" != "1" ]] && complexity_output_complete "$output_yaml"; then
     echo "SKIP complexity: $model_key: existing $output_yaml"
     return 0
   fi
   echo "RUN complexity: $model_key -> $output_yaml"
+  local include_args=()
+  local include_arg
+  while IFS= read -r include_arg; do
+    [[ -n "$include_arg" ]] && include_args+=("$include_arg")
+  done < <(cpu_profile_args)
   (
     cd "$APP_DIR"
     python3 profile_config_complexity.py \
@@ -307,6 +355,7 @@ run_complexity() {
       --output-yaml "$output_yaml" \
       --model-key "$model_key" \
       --device "$DEVICE" \
+      "${include_args[@]}" \
       --batch-size "$BATCH_SIZE" \
       --input-length "$INPUT_LENGTH" \
       --warmup "$WARMUP" \

@@ -17,6 +17,7 @@ def parse_args():
     parser.add_argument("--descod-dir", required=True)
     parser.add_argument("--output-yaml", required=True)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--include-cpu", action="store_true")
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--input-length", type=int, default=512)
     parser.add_argument("--warmup", type=int, default=5)
@@ -34,6 +35,10 @@ def normalize_yaml_values(values):
         else:
             normalized[key] = value
     return normalized
+
+
+def device_label(device):
+    return "gpu" if device.type == "cuda" else "cpu"
 
 
 def ensure_optional_reference_imports():
@@ -71,29 +76,23 @@ class ReferenceDeScoDWrapper(nn.Module):
         return self.forward(x)
 
 
-def main():
-    args = parse_args()
-    descod_dir = Path(args.descod_dir).resolve()
-    config_path = descod_dir / "config" / "base.yaml"
-    with open(config_path, "r", encoding="utf-8") as handle:
-        config = yaml.safe_load(handle)
-
-    ensure_optional_reference_imports()
+def build_reference_descod_model(descod_dir, config, device, num_shots):
     denoising_model = load_reference_module(
-        "reference_descod_denoising_model_small",
+        f"reference_descod_denoising_model_small_{device.type}",
         descod_dir / "denoising_model_small.py",
     )
     main_model = load_reference_module(
-        "reference_descod_main_model",
+        f"reference_descod_main_model_{device.type}",
         descod_dir / "main_model.py",
     )
-
-    device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
     feats = int(config["train"].get("feats", 80))
     base_model = denoising_model.ConditionalModel(feats=feats).to(device)
     diffusion = main_model.DDPM(base_model, config, device, conditional=True).to(device)
-    model = ReferenceDeScoDWrapper(diffusion, args.num_shots).to(device)
+    return ReferenceDeScoDWrapper(diffusion, num_shots).to(device)
 
+
+def profile_on_device(descod_dir, config, args, device):
+    model = build_reference_descod_model(descod_dir, config, device, args.num_shots)
     complexity = profile_model_complexity(
         model,
         device,
@@ -102,6 +101,25 @@ def main():
         warmup=args.warmup,
         repeats=args.repeats,
     )
+    return {
+        "device": str(device),
+        **normalize_yaml_values(complexity),
+    }
+
+
+def main():
+    args = parse_args()
+    descod_dir = Path(args.descod_dir).resolve()
+    config_path = descod_dir / "config" / "base.yaml"
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+
+    ensure_optional_reference_imports()
+    primary_device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
+    devices = [primary_device]
+    if args.include_cpu and primary_device.type != "cpu":
+        devices.append(torch.device("cpu"))
+
     output = {
         "model_key": args.model_key,
         "model_name": "reference_descod_ecg",
@@ -110,9 +128,9 @@ def main():
         "num_shots": int(args.num_shots),
         "input_length": int(args.input_length),
         "batch_size": int(args.batch_size),
-        "device": str(device),
-        **normalize_yaml_values(complexity),
     }
+    for device in devices:
+        output[device_label(device)] = profile_on_device(descod_dir, config, args, device)
 
     output_path = Path(args.output_yaml)
     output_path.parent.mkdir(parents=True, exist_ok=True)

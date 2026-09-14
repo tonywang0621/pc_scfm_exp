@@ -15,6 +15,7 @@ def parse_args():
     parser.add_argument("--config", required=True)
     parser.add_argument("--output-yaml", required=True)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--include-cpu", action="store_true")
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--input-length", type=int, default=None)
     parser.add_argument("--warmup", type=int, default=5)
@@ -34,13 +35,12 @@ def normalize_yaml_values(values):
     return normalized
 
 
-def main():
-    args = parse_args()
-    cfg = OmegaConf.merge(OmegaConf.load(args.config), OmegaConf.from_dotlist(args.overrides))
-    device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
-    model = get_model(cfg.model_name, **OmegaConf.to_container(cfg.model, resolve=True)).to(device)
-    input_length = args.input_length or int(cfg.dataset.get("window_size", 512))
+def device_label(device):
+    return "gpu" if device.type == "cuda" else "cpu"
 
+
+def profile_on_device(cfg, args, device, input_length):
+    model = get_model(cfg.model_name, **OmegaConf.to_container(cfg.model, resolve=True)).to(device)
     complexity = profile_model_complexity(
         model,
         device,
@@ -49,6 +49,22 @@ def main():
         warmup=args.warmup,
         repeats=args.repeats,
     )
+    return {
+        "device": str(device),
+        **normalize_yaml_values(complexity),
+    }
+
+
+def main():
+    args = parse_args()
+    cfg = OmegaConf.merge(OmegaConf.load(args.config), OmegaConf.from_dotlist(args.overrides))
+    primary_device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
+    input_length = args.input_length or int(cfg.dataset.get("window_size", 512))
+
+    devices = [primary_device]
+    if args.include_cpu and primary_device.type != "cpu":
+        devices.append(torch.device("cpu"))
+
     output = {
         "model_key": args.model_key,
         "model_name": str(cfg.model_name),
@@ -56,9 +72,9 @@ def main():
         "overrides": list(args.overrides),
         "input_length": int(input_length),
         "batch_size": int(args.batch_size),
-        "device": str(device),
-        **normalize_yaml_values(complexity),
     }
+    for device in devices:
+        output[device_label(device)] = profile_on_device(cfg, args, device, input_length)
 
     output_path = Path(args.output_yaml)
     output_path.parent.mkdir(parents=True, exist_ok=True)
