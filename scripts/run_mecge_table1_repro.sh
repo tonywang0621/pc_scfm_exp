@@ -70,6 +70,7 @@ Options:
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot_median,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot_median,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8,
                         bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience,
@@ -129,6 +130,7 @@ Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot_median --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot_median --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median --seed 3407 --nv all --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4 --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8 --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience --seed 3407 --nv all --device cuda:0
@@ -390,6 +392,9 @@ normalize_model() {
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median"
       ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean"
+      ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4"
       ;;
@@ -450,6 +455,7 @@ normalize_model() {
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot_median,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot_median,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8,
                         bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience,
@@ -982,6 +988,7 @@ DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_R
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_3SHOT_MEDIAN_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot_median"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_5SHOT_MEDIAN_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot_median"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_MEDIAN_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_ANTITHETIC_MEAN_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP4_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP8_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_BIGRU_RESCONVCTX_30E_NOP_CONFIG="configs/mecge_table1_repro_bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience.yaml"
@@ -1059,6 +1066,7 @@ run_selected_models_for_nv() {
         run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_3SHOT_MEDIAN_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=3" "model.cfm_inference_start_noise_scale=0.01" "model.cfm_inference_shot_aggregation=median"
         run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_5SHOT_MEDIAN_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=5" "model.cfm_inference_start_noise_scale=0.01" "model.cfm_inference_shot_aggregation=median"
         run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_MEDIAN_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=10" "model.cfm_inference_start_noise_scale=0.01" "model.cfm_inference_shot_aggregation=median"
+        run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_ANTITHETIC_MEAN_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=10" "model.cfm_inference_start_noise_scale=0.01" "model.cfm_inference_shot_sampling=antithetic" "model.cfm_inference_shot_aggregation=mean"
         run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "4"
         run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "8"
       done
@@ -1170,6 +1178,9 @@ run_selected_models_for_nv() {
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_median)
       run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_MEDIAN_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=10" "model.cfm_inference_start_noise_scale=0.01" "model.cfm_inference_shot_aggregation=median"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot_antithetic_mean)
+      run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_ANTITHETIC_MEAN_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=10" "model.cfm_inference_start_noise_scale=0.01" "model.cfm_inference_shot_sampling=antithetic" "model.cfm_inference_shot_aggregation=mean"
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4)
       run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "4"

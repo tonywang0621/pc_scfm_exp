@@ -878,6 +878,14 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
                 "model.cfm_inference_shot_aggregation must be one of: mean, median; "
                 f"got {self.cfm_inference_shot_aggregation!r}."
             )
+        self.cfm_inference_shot_sampling = str(h.get("cfm_inference_shot_sampling", "independent")).lower()
+        if self.cfm_inference_shot_sampling not in {"independent", "antithetic"}:
+            raise ValueError(
+                "model.cfm_inference_shot_sampling must be one of: independent, antithetic; "
+                f"got {self.cfm_inference_shot_sampling!r}."
+            )
+        if self.cfm_inference_shot_sampling == "antithetic" and self.cfm_inference_shots % 2 != 0:
+            raise ValueError("Antithetic inference shot sampling requires an even model.cfm_inference_shots value.")
         self.cfm_inference_start_noise_scale = float(h.get("cfm_inference_start_noise_scale", 0.0))
         self.cfm_train_noise_scale = float(h.get("cfm_train_noise_scale", 0.05))
         self.cfm_zero_start_prob = float(h.get("cfm_zero_start_prob", 0.5))
@@ -1002,22 +1010,37 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
         weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
         return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
 
-    def _initial_inference_residual(self, condition):
+    def _initial_inference_residual(self, condition, start_noise=None):
         residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
         if self.cfm_inference_start_noise_scale > 0:
-            residual = residual + self.cfm_inference_start_noise_scale * torch.randn_like(residual)
+            if start_noise is None:
+                start_noise = torch.randn_like(residual)
+            residual = residual + self.cfm_inference_start_noise_scale * start_noise
         return residual
 
-    def _integrate_residual_flow(self, condition, steps=None):
+    def _integrate_residual_flow(self, condition, steps=None, start_noise=None):
         steps = int(steps or self.cfm_inference_steps)
         steps = max(steps, 1)
-        residual = self._initial_inference_residual(condition)
+        residual = self._initial_inference_residual(condition, start_noise=start_noise)
         dt = 1.0 / steps
         for step in range(steps):
             t_value = (step + 0.5) / steps
             t = torch.full((condition.shape[0],), t_value, device=condition.device, dtype=condition.dtype)
             residual = residual + dt * self.residual_flow(residual, condition, t)
         return residual
+
+    def _inference_start_noises(self, condition):
+        if self.cfm_inference_start_noise_scale <= 0:
+            return [None] * self.cfm_inference_shots
+        noise_shape = (condition.shape[0], 2, condition.shape[-1])
+        if self.cfm_inference_shot_sampling == "independent":
+            return [torch.randn(noise_shape, device=condition.device, dtype=condition.dtype) for _ in range(self.cfm_inference_shots)]
+        half_shots = self.cfm_inference_shots // 2
+        noises = [torch.randn(noise_shape, device=condition.device, dtype=condition.dtype) for _ in range(half_shots)]
+        paired_noises = []
+        for noise in noises:
+            paired_noises.extend([noise, -noise])
+        return paired_noises
 
     def _aggregate_inference_shots(self, shots):
         if self.cfm_inference_shot_aggregation == "mean":
@@ -1032,8 +1055,9 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
     def _refine_from_base(self, noisy_audio, base_restored, baseline_hat=None):
         condition = self._flow_condition(noisy_audio, base_restored, baseline_hat=baseline_hat)
         if self.cfm_inference_shots > 1 and not self.training:
+            start_noises = self._inference_start_noises(condition)
             flow_hat = torch.stack(
-                [self._integrate_residual_flow(condition) for _ in range(self.cfm_inference_shots)],
+                [self._integrate_residual_flow(condition, start_noise=start_noise) for start_noise in start_noises],
                 dim=0,
             )
             flow_hat = self._aggregate_inference_shots(flow_hat)

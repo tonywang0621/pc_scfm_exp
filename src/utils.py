@@ -421,6 +421,10 @@ def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5
         return model(x)
 
     flops = float("nan")
+    existing_forward_hooks = {
+        module: set(module._forward_hooks.keys())
+        for module in model.modules()
+    }
     try:
         from thop import profile
 
@@ -432,6 +436,10 @@ def profile_model_complexity(model, device, input_length, batch_size=1, warmup=5
         pass
     finally:
         for module in model.modules():
+            original_hooks = existing_forward_hooks.get(module, set())
+            for hook_id in list(module._forward_hooks.keys()):
+                if hook_id not in original_hooks:
+                    module._forward_hooks.pop(hook_id, None)
             module._buffers.pop("total_ops", None)
             module._buffers.pop("total_params", None)
 
