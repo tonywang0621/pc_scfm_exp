@@ -1274,10 +1274,10 @@ class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMamb
         weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
         return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
 
-    def _integrate_residual_flow(self, condition, steps=None):
+    def _integrate_residual_flow(self, condition, steps=None, start_noise=None):
         steps = int(steps or self.cfm_inference_steps)
         steps = max(steps, 1)
-        residual = self._initial_inference_residual(condition)
+        residual = self._initial_inference_residual(condition, start_noise=start_noise)
         dt = 1.0 / steps
         for step in range(steps):
             t_value = (step + 0.5) / steps
@@ -1515,11 +1515,11 @@ class StableUNetResidualFlowDualPathDAPPMambAttentionCore(UNetResidualFlowDualPa
         weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
         return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
 
-    def _integrate_residual_flow(self, condition, steps=None):
+    def _integrate_residual_flow(self, condition, steps=None, start_noise=None):
         condition = self._clip_by_robust_scale(torch.nan_to_num(condition), self.cfm_condition_clip)
         steps = int(steps or self.cfm_inference_steps)
         steps = max(steps, 1)
-        residual = self._initial_inference_residual(condition)
+        residual = self._initial_inference_residual(condition, start_noise=start_noise)
         residual = self._clip_by_robust_scale(torch.nan_to_num(residual), self.cfm_state_clip)
         dt = 1.0 / steps
         for step in range(steps):
