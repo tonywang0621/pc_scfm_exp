@@ -40,19 +40,28 @@ def device_label(device):
 
 
 def profile_on_device(cfg, args, device, input_length):
-    model = get_model(cfg.model_name, **OmegaConf.to_container(cfg.model, resolve=True)).to(device)
-    complexity = profile_model_complexity(
-        model,
-        device,
-        input_length=input_length,
-        batch_size=args.batch_size,
-        warmup=args.warmup,
-        repeats=args.repeats,
-    )
-    return {
-        "device": str(device),
-        **normalize_yaml_values(complexity),
-    }
+    try:
+        model = get_model(cfg.model_name, **OmegaConf.to_container(cfg.model, resolve=True)).to(device)
+        complexity = profile_model_complexity(
+            model,
+            device,
+            input_length=input_length,
+            batch_size=args.batch_size,
+            warmup=args.warmup,
+            repeats=args.repeats,
+        )
+        return {
+            "status": "ok",
+            "device": str(device),
+            **normalize_yaml_values(complexity),
+        }
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "device": str(device),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
 
 
 def main():

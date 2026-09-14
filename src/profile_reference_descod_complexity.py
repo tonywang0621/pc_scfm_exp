@@ -92,19 +92,28 @@ def build_reference_descod_model(descod_dir, config, device, num_shots):
 
 
 def profile_on_device(descod_dir, config, args, device):
-    model = build_reference_descod_model(descod_dir, config, device, args.num_shots)
-    complexity = profile_model_complexity(
-        model,
-        device,
-        input_length=args.input_length,
-        batch_size=args.batch_size,
-        warmup=args.warmup,
-        repeats=args.repeats,
-    )
-    return {
-        "device": str(device),
-        **normalize_yaml_values(complexity),
-    }
+    try:
+        model = build_reference_descod_model(descod_dir, config, device, args.num_shots)
+        complexity = profile_model_complexity(
+            model,
+            device,
+            input_length=args.input_length,
+            batch_size=args.batch_size,
+            warmup=args.warmup,
+            repeats=args.repeats,
+        )
+        return {
+            "status": "ok",
+            "device": str(device),
+            **normalize_yaml_values(complexity),
+        }
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "device": str(device),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
 
 
 def main():
