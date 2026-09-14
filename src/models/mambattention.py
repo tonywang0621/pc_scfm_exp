@@ -1331,6 +1331,70 @@ class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMamb
         return loss
 
 
+class NoisyInputUNetFlowMatchingCore(UNetResidualFlowDualPathDAPPMambAttentionCore):
+    def _noisy_base_and_condition(self, noisy_audio):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        base_restored = noisy_audio
+        baseline_hat = torch.zeros_like(noisy_audio)
+        condition = self._flow_condition(noisy_audio, base_restored, baseline_hat=baseline_hat)
+        return base_restored, baseline_hat, condition
+
+    def restore_one_shot(self, noisy_audio, return_com=False):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        base_restored, baseline_hat, _ = self._noisy_base_and_condition(noisy_audio)
+        refined, _, _, _, _ = self._refine_from_base(noisy_audio, base_restored, baseline_hat=baseline_hat)
+        if return_com:
+            return refined, None
+        return refined
+
+    def restore_with_metadata(self, noisy_audio, valid_mask=None):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        if noisy_audio.shape[1] != 1:
+            raise ValueError(
+                f"Noisy-input UNet-CFM expects single-lead input shaped [B, 1, T], got {noisy_audio.shape}."
+            )
+        norm_factor = self._norm_factor(noisy_audio)
+        noisy_audio_norm = noisy_audio * norm_factor
+        base_restored, baseline_hat, condition = self._noisy_base_and_condition(noisy_audio_norm)
+        refined, flow_hat, _, _, _ = self._refine_from_base(
+            noisy_audio_norm,
+            base_restored,
+            baseline_hat=baseline_hat,
+        )
+        clean_gate, baseline_gate, consistency_blend = self._cfm_gates(condition)
+        metadata = {
+            "cfm_clean_delta_abs_mean": flow_hat[:, 0:1].detach().abs().mean(dim=-1),
+            "cfm_baseline_delta_abs_mean": flow_hat[:, 1:2].detach().abs().mean(dim=-1),
+            "cfm_refine_gate": clean_gate.detach().mean(dim=0).view(1),
+            "cfm_baseline_gate": baseline_gate.detach().mean(dim=0).view(1),
+            "cfm_consistency_blend": consistency_blend.detach().mean(dim=0).view(1),
+        }
+        self.last_metadata = metadata
+        return refined / norm_factor, metadata
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        base_restored, _, condition = self._noisy_base_and_condition(noisy_audio)
+        target_clean_residual = clean_audio.unsqueeze(1) - base_restored.detach()
+        target_baseline_residual = noisy_audio - clean_audio.unsqueeze(1)
+        target_residual = torch.cat([target_clean_residual, target_baseline_residual], dim=1)
+        channel_weight = [self.lambda_cfm, self.lambda_cfm_baseline]
+        return self._flow_matching_loss(
+            condition.detach(),
+            target_residual.detach(),
+            channel_weight=channel_weight,
+            valid_mask=valid_mask,
+        )
+
+
 class StableUNetResidualFlowDualPathDAPPMambAttentionCore(UNetResidualFlowDualPathDAPPMambAttentionCore):
     """Numerically conservative UNet-CFM refiner for QTDB/NSTDB baseline removal.
 
@@ -1696,6 +1760,11 @@ class MambAttentionSTFrFTDualPathDAPPH32ECGDenoiser(MambAttentionSTFrFTDualPathD
     pass
 
 
+@register_model("lstm_dualpath_dapp_no_flow_ecg")
+class LSTMDualPathDAPPNoFlowECGDenoiser(MambAttentionSTFrFTDualPathDAPPECGDenoiser):
+    block_cls = LightweightLSTMContextBlock
+
+
 @register_model("mambattention_stfrft_dualpath_dapp_v2_ecg")
 class MambAttentionSTFrFTDualPathDAPPV2ECGDenoiser(ECGDenoisingModel):
     block_cls = MambAttentionBlock
@@ -1777,6 +1846,18 @@ class LSTMDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
     MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
 ):
     block_cls = LightweightLSTMContextBlock
+
+
+@register_model("lstm_noisy_input_cfm_unet_bd_flow_only_ecg")
+class LSTMNoisyInputCFMUNetBaselineDominantFlowOnlyECGDenoiser(ECGDenoisingModel):
+    block_cls = LightweightLSTMContextBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = NoisyInputUNetFlowMatchingCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
 
 
 @register_model("bigru_dualpath_dapp_cfm_unet_bd_ecg")
