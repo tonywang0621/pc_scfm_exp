@@ -153,6 +153,8 @@ def build_optimizer(model, args):
         return torch.optim.AdamW(model.parameters(), lr=args.lr, betas=args.betas, weight_decay=args.weight_decay)
     if optimizer_name == "adam":
         return torch.optim.Adam(model.parameters(), lr=args.lr, betas=args.betas, weight_decay=args.weight_decay)
+    if optimizer_name == "radam":
+        return torch.optim.RAdam(model.parameters(), lr=args.lr, betas=args.betas, weight_decay=args.weight_decay)
     raise ValueError(f"Unsupported optimizer: {args.optimizer}")
 
 

@@ -64,6 +64,9 @@ Options:
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8,
                         bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience,
@@ -71,7 +74,7 @@ Options:
                         stfrft, main, stable, baseline_sentry_lite,
                         baseline_sentry_flow, physio_freq_sentry_flow,
                         mecge_resflow_lite,
-                        eddm_fm, eddm_fm_mamba, eddm_1shot.
+                        eddm_fm, eddm_fm_mamba, eddm_1shot, eddm_10shot.
   --seed N              Run one seed only. Default for single-model jobs: 3407.
                         Official MECG-E always uses the reference seed 3407.
   --skip-train          Only run robustness inference/aggregation from existing checkpoints.
@@ -117,6 +120,9 @@ Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only --seed 3407 --nv all --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot --seed 3407 --nv all --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot --seed 3407 --nv all --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4 --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8 --seed 3407 --nv all --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience --seed 3407 --nv all --device cuda:0
@@ -126,6 +132,7 @@ Single-job examples:
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_fm_mamba --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model eddm_1shot --seed 3407 --nv 1 --device cuda:0
+  bash scripts/run_mecge_table1_repro.sh --model eddm_10shot --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model stfrft --seed 3407 --nv 1 --resume --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model baseline_sentry_lite --seed 3407 --nv 1 --device cuda:0
   bash scripts/run_mecge_table1_repro.sh --model baseline_sentry_flow --seed 3407 --nv 1 --device cuda:0
@@ -359,6 +366,15 @@ normalize_model() {
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only"
       ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot)
+      printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot"
+      ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4"
       ;;
@@ -401,6 +417,9 @@ normalize_model() {
     eddm|eddm_1shot)
       printf '%s\n' "eddm_1shot"
       ;;
+    eddm_10shot|eddm-10|eddm_10)
+      printf '%s\n' "eddm_10shot"
+      ;;
     *)
       echo "Unsupported --model '$1'. Expected one of: all, mecge, mecge_no_early_stop, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, dualpath_dapp_cfm_unet_bd_no_attention_v2, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_bd_v3, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v3_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_100epoch_patience15,
                         mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_60epoch_patience10,
@@ -410,10 +429,13 @@ normalize_model() {
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8,
                         bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience,
-                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7b_mecge_style_30epoch_no_patience, stfrft, main, stable, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, eddm_fm, eddm_fm_mamba, eddm_1shot." >&2
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7b_mecge_style_30epoch_no_patience, stfrft, main, stable, baseline_sentry_lite, baseline_sentry_flow, physio_freq_sentry_flow, mecge_resflow_lite, eddm_fm, eddm_fm_mamba, eddm_1shot, eddm_10shot." >&2
       exit 2
       ;;
   esac
@@ -733,6 +755,8 @@ run_official_local_model_eval_from_checkpoint() {
   local nv="$7"
   local pkl_file="$8"
   local cfm_steps="$9"
+  shift 9
+  local eval_overrides=("$@")
   local exp_name="${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
   local source_exp_name="${source_result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
   local result_pkl
@@ -765,6 +789,62 @@ run_official_local_model_eval_from_checkpoint() {
         --skip-train \
         --eval-checkpoint "$source_checkpoint" \
         "model.cfm_inference_steps=$cfm_steps" \
+        "${eval_overrides[@]}" \
+        "${EXTRA_OVERRIDES[@]}"
+    )
+  fi
+
+  if [[ ! -f "$result_pkl" ]]; then
+    echo "Missing official-flow local result: $result_pkl" >&2
+    exit 1
+  fi
+  write_official_metrics "$result_pkl" "$result_model" "$model_name" "$exp_name"
+  run_exp2_inference "$config" "$result_model" "$model_name" "$seed" "$exp_name" "$nv" "$pkl_file"
+}
+
+run_official_local_model_eval_from_checkpoint_with_overrides() {
+  local config="$1"
+  local result_model="$2"
+  local model_name="$3"
+  local source_result_model="$4"
+  local source_model_name="$5"
+  local seed="$6"
+  local nv="$7"
+  local pkl_file="$8"
+  shift 8
+  local eval_overrides=("$@")
+  local exp_name="${result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
+  local source_exp_name="${source_result_model}__qtdb_train_qtdb_test__nv${nv}__seed${seed}"
+  local result_pkl
+  result_pkl="$(official_result_pkl "$result_model" "$nv" "$seed")"
+  local checkpoint_run_dir="$RUN_ROOT/$result_model/checkpoint/$exp_name/$model_name"
+  local log_run_dir="$RUN_ROOT/$result_model/log/$exp_name/$model_name"
+  local source_checkpoint="$RUN_ROOT/$source_result_model/checkpoint/$source_exp_name/$source_model_name/best_model.pt"
+
+  echo "RUN official-flow local eval-only job: model=$result_model seed=$seed nv=nv${nv}"
+  if [[ ! -f "$source_checkpoint" ]]; then
+    echo "Missing source checkpoint for eval-only run: $source_checkpoint" >&2
+    echo "Train or place the source checkpoint first: $source_result_model nv${nv} seed${seed}" >&2
+    exit 1
+  fi
+
+  if [[ "$FORCE_RERUN" != "1" && -f "$result_pkl" ]]; then
+    echo "Found existing eval-only local result for nv${nv}; skipping test: $result_pkl"
+  else
+    mkdir -p "$checkpoint_run_dir" "$log_run_dir" "$(dirname "$result_pkl")"
+    (
+      cd "$APP_DIR"
+      python3 mecge_table1_run_official_local_model.py \
+        --config "$config" \
+        --dataset-pkl "$pkl_file" \
+        --device "$DEVICE" \
+        --output-pkl "$result_pkl" \
+        --checkpoint-dir "$checkpoint_run_dir" \
+        --log-dir "$log_run_dir" \
+        --seed "$seed" \
+        --skip-train \
+        --eval-checkpoint "$source_checkpoint" \
+        "${eval_overrides[@]}" \
         "${EXTRA_OVERRIDES[@]}"
     )
   fi
@@ -878,6 +958,9 @@ DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_MODEL_
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_CONFIG="configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only.yaml"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_MODEL_NAME="lstm_noisy_input_cfm_unet_bd_flow_only_ecg"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_3SHOT_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_5SHOT_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP4_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP8_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step8"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_BIGRU_RESCONVCTX_30E_NOP_CONFIG="configs/mecge_table1_repro_bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience.yaml"
@@ -912,6 +995,7 @@ EDDM_FM_MAMBA_RESULT_MODEL="eddm_flow_matching_mamba"
 EDDM_FM_MAMBA_MODEL_NAME="eddm_flow_matching_mamba"
 EDDM_CONFIG="configs/mecge_table1_repro_eddm_1shot.yaml"
 EDDM_RESULT_MODEL="eddm_1shot"
+EDDM_10SHOT_RESULT_MODEL="eddm_10shot"
 EDDM_MODEL_NAME="eddm"
 
 run_selected_models_for_nv() {
@@ -948,6 +1032,9 @@ run_selected_models_for_nv() {
       run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_official_local_model_family "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       for seed in $SEEDS_MAIN; do
+        run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_3SHOT_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=3" "model.cfm_inference_start_noise_scale=0.01"
+        run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_5SHOT_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=5" "model.cfm_inference_start_noise_scale=0.01"
+        run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=10" "model.cfm_inference_start_noise_scale=0.01"
         run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "4"
         run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP8_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$seed" "$nv" "$pkl_file" "8"
       done
@@ -963,6 +1050,9 @@ run_selected_models_for_nv() {
       run_model_family "$EDDM_FM_CONFIG" "$EDDM_FM_RESULT_MODEL" "$EDDM_FM_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$EDDM_FM_MAMBA_CONFIG" "$EDDM_FM_MAMBA_RESULT_MODEL" "$EDDM_FM_MAMBA_MODEL_NAME" "$SEEDS_MAIN" "$nv" "$pkl_file"
       run_model_family "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$SEEDS_EDDM" "$nv" "$pkl_file"
+      for seed in $SEEDS_EDDM; do
+        run_official_local_model_eval_from_checkpoint_with_overrides "$EDDM_CONFIG" "$EDDM_10SHOT_RESULT_MODEL" "$EDDM_MODEL_NAME" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "$seed" "$nv" "$pkl_file" "model.num_shots=10"
+      done
       ;;
     main)
       run_one_job "$MAIN_CONFIG" "$MAIN_RESULT_MODEL" "$MAIN_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
@@ -1039,6 +1129,15 @@ run_selected_models_for_nv() {
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only)
       run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_FLOW_ONLY_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot)
+      run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_3SHOT_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=3" "model.cfm_inference_start_noise_scale=0.01"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_5shot)
+      run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_5SHOT_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=5" "model.cfm_inference_start_noise_scale=0.01"
+      ;;
+    dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_10shot)
+      run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP1_10SHOT_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "1" "model.cfm_inference_shots=10" "model.cfm_inference_start_noise_scale=0.01"
+      ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step4)
       run_official_local_model_eval_from_checkpoint "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_STEP4_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "4"
       ;;
@@ -1077,6 +1176,9 @@ run_selected_models_for_nv() {
       ;;
     eddm_1shot)
       run_one_job "$EDDM_CONFIG" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    eddm_10shot)
+      run_official_local_model_eval_from_checkpoint_with_overrides "$EDDM_CONFIG" "$EDDM_10SHOT_RESULT_MODEL" "$EDDM_MODEL_NAME" "$EDDM_RESULT_MODEL" "$EDDM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "model.num_shots=10"
       ;;
   esac
 }

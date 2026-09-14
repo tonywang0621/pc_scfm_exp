@@ -67,15 +67,17 @@ dataset:
   eps: 1.0e-10
 
 model:
-  time_steps: 30
-  beta_start: 1.0e-4
-  beta_end: 0.02
-  base_channels: 64
-  channel_mults: [1, 2, 4]
-  time_embedding_dim: 128
-  num_res_blocks: 2
-  dropout: 0.0
-  groups: 8
-  conditioning_dropout: 0.0
+  # EDDM paper-faithful diffusion setup (Li et al. 2025, Section IV-C2):
+  # T=50 diffusion steps and EDDM-k uses the same trained denoiser with
+  # k stochastic reverse-process shots averaged at inference time.
+  timesteps: 50
   num_shots: 1
-  loss_fn: "noise_l1"
+  base_channels: 64
+  channel_mults: [1, 2, 4, 8]
+  time_dim: 256
+  dropout: 0.0
+  gaussian_scale: 1.0
+  ecg_noise_weight: 1.0
+  gaussian_noise_weight: 1.0
+  pool_scales: [3, 5, 9, 15]
+  attention_heads: 4

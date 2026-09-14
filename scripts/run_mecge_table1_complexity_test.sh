@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT_DIR/src"
+DESCOD_DIR="${DESCOD_DIR:-$ROOT_DIR/references/Score-based-ECG-Denoising}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/work/tonyalpha1/pc_scfm_exp/runs/mecge_table1_repro/complexity_test}"
 DEVICE="${DEVICE:-cuda:0}"
@@ -25,7 +26,8 @@ Options:
                         dualpath_dapp_cfm_unet_bd_no_attention,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience,
                         stfrft, main, stable, eddm_fm, eddm_fm_mamba,
-                        eddm_1shot, eddm_3shot, eddm_5shot, eddm_10shot.
+                        eddm_1shot, eddm_3shot, eddm_5shot, eddm_10shot,
+                        descod_1shot, descod_3shot, descod_5shot, descod_10shot.
   --output-root PATH    Output directory. Default:
                         /work/tonyalpha1/pc_scfm_exp/runs/mecge_table1_repro/complexity_test
   --device DEVICE       Profiling device. Default: cuda:0
@@ -150,6 +152,18 @@ normalize_model() {
     eddm_10shot|eddm-10|eddm_10)
       printf '%s\n' "eddm_10shot"
       ;;
+    descod|descod_1shot|descod-1|descod1)
+      printf '%s\n' "descod_1shot"
+      ;;
+    descod_3shot|descod-3|descod3)
+      printf '%s\n' "descod_3shot"
+      ;;
+    descod_5shot|descod-5|descod5)
+      printf '%s\n' "descod_5shot"
+      ;;
+    descod_10shot|descod-10|descod10)
+      printf '%s\n' "descod_10shot"
+      ;;
     *)
       echo "Unsupported --model '$1'." >&2
       usage >&2
@@ -225,8 +239,54 @@ overrides_for_model() {
   esac
 }
 
+descod_shots_for_model() {
+  case "$1" in
+    descod_1shot)
+      printf '%s\n' "1"
+      ;;
+    descod_3shot)
+      printf '%s\n' "3"
+      ;;
+    descod_5shot)
+      printf '%s\n' "5"
+      ;;
+    descod_10shot)
+      printf '%s\n' "10"
+      ;;
+  esac
+}
+
 run_complexity() {
   local model_key="$1"
+  local descod_shots
+  descod_shots="$(descod_shots_for_model "$model_key")"
+  if [[ -n "$descod_shots" ]]; then
+    local output_yaml="$OUTPUT_ROOT/${model_key}_complexity_test.yaml"
+    if [[ "$FORCE" != "1" && -f "$output_yaml" ]]; then
+      echo "SKIP complexity: $model_key: existing $output_yaml"
+      return 0
+    fi
+    if [[ ! -d "$DESCOD_DIR" ]]; then
+      echo "Missing reference DeScoD directory: $DESCOD_DIR" >&2
+      exit 1
+    fi
+    echo "RUN complexity: $model_key -> $output_yaml"
+    (
+      cd "$APP_DIR"
+      python3 profile_reference_descod_complexity.py \
+        --descod-dir "$DESCOD_DIR" \
+        --output-yaml "$output_yaml" \
+        --model-key "$model_key" \
+        --num-shots "$descod_shots" \
+        --device "$DEVICE" \
+        --batch-size "$BATCH_SIZE" \
+        --input-length "$INPUT_LENGTH" \
+        --warmup "$WARMUP" \
+        --repeats "$REPEATS"
+    )
+    return 0
+  fi
+
   local config
   config="$(config_for_model "$model_key")"
   local overrides=()
@@ -278,6 +338,10 @@ if [[ "$TARGET_MODEL" == "all" ]]; then
     eddm_3shot
     eddm_5shot
     eddm_10shot
+    descod_1shot
+    descod_3shot
+    descod_5shot
+    descod_10shot
   )
 else
   MODELS=("$TARGET_MODEL")

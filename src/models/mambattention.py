@@ -871,6 +871,8 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
         super().__init__(config, block_cls=block_cls)
         h = self.h
         self.cfm_inference_steps = int(h.get("cfm_inference_steps", 2))
+        self.cfm_inference_shots = max(int(h.get("cfm_inference_shots", 1)), 1)
+        self.cfm_inference_start_noise_scale = float(h.get("cfm_inference_start_noise_scale", 0.0))
         self.cfm_train_noise_scale = float(h.get("cfm_train_noise_scale", 0.05))
         self.cfm_zero_start_prob = float(h.get("cfm_zero_start_prob", 0.5))
         self.cfm_bridge_noise_scale = float(h.get("cfm_bridge_noise_scale", 0.02))
@@ -994,10 +996,16 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
         weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
         return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
 
+    def _initial_inference_residual(self, condition):
+        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        if self.cfm_inference_start_noise_scale > 0:
+            residual = residual + self.cfm_inference_start_noise_scale * torch.randn_like(residual)
+        return residual
+
     def _integrate_residual_flow(self, condition, steps=None):
         steps = int(steps or self.cfm_inference_steps)
         steps = max(steps, 1)
-        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        residual = self._initial_inference_residual(condition)
         dt = 1.0 / steps
         for step in range(steps):
             t_value = (step + 0.5) / steps
@@ -1007,7 +1015,13 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
 
     def _refine_from_base(self, noisy_audio, base_restored, baseline_hat=None):
         condition = self._flow_condition(noisy_audio, base_restored, baseline_hat=baseline_hat)
-        flow_hat = self._integrate_residual_flow(condition)
+        if self.cfm_inference_shots > 1 and not self.training:
+            flow_hat = torch.stack(
+                [self._integrate_residual_flow(condition) for _ in range(self.cfm_inference_shots)],
+                dim=0,
+            ).mean(dim=0)
+        else:
+            flow_hat = self._integrate_residual_flow(condition)
         clean_delta_hat = flow_hat[:, 0:1]
         baseline_delta_hat = flow_hat[:, 1:2]
         estimated_baseline = noisy_audio - base_restored
@@ -1222,7 +1236,7 @@ class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMamb
     def _integrate_residual_flow(self, condition, steps=None):
         steps = int(steps or self.cfm_inference_steps)
         steps = max(steps, 1)
-        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        residual = self._initial_inference_residual(condition)
         dt = 1.0 / steps
         for step in range(steps):
             t_value = (step + 0.5) / steps
@@ -1464,7 +1478,8 @@ class StableUNetResidualFlowDualPathDAPPMambAttentionCore(UNetResidualFlowDualPa
         condition = self._clip_by_robust_scale(torch.nan_to_num(condition), self.cfm_condition_clip)
         steps = int(steps or self.cfm_inference_steps)
         steps = max(steps, 1)
-        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        residual = self._initial_inference_residual(condition)
+        residual = self._clip_by_robust_scale(torch.nan_to_num(residual), self.cfm_state_clip)
         dt = 1.0 / steps
         for step in range(steps):
             t_value = (step + 0.5) / steps
