@@ -68,6 +68,11 @@ def parse_args():
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--resume-checkpoint", default=None)
+    parser.add_argument(
+        "--eval-checkpoint",
+        default=None,
+        help="Optional checkpoint path to evaluate instead of checkpoint-dir/best_model.pt.",
+    )
     parser.add_argument("overrides", nargs="*")
     return parser.parse_args()
 
@@ -312,8 +317,8 @@ def train_model(model, train_loader, val_loader, args, checkpoint_dir, writer):
             break
 
 
-def test_model(model, test_loader, checkpoint_dir, x_test_original, y_test_original, output_pkl, device):
-    model_filepath = checkpoint_dir / "best_model.pt"
+def test_model(model, test_loader, checkpoint_dir, x_test_original, y_test_original, output_pkl, device, eval_checkpoint=None):
+    model_filepath = Path(eval_checkpoint).resolve() if eval_checkpoint else checkpoint_dir / "best_model.pt"
     model.load_state_dict(torch.load(model_filepath, map_location="cpu"))
     model.to(device)
     model.eval()
@@ -383,7 +388,16 @@ def main():
         finally:
             writer.close()
 
-    test_model(model, test_loader, checkpoint_dir, x_test_original, y_test_original, output_pkl, args.device)
+    test_model(
+        model,
+        test_loader,
+        checkpoint_dir,
+        x_test_original,
+        y_test_original,
+        output_pkl,
+        args.device,
+        eval_checkpoint=args.eval_checkpoint,
+    )
 
 
 if __name__ == "__main__":
