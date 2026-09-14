@@ -872,6 +872,12 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
         h = self.h
         self.cfm_inference_steps = int(h.get("cfm_inference_steps", 2))
         self.cfm_inference_shots = max(int(h.get("cfm_inference_shots", 1)), 1)
+        self.cfm_inference_shot_aggregation = str(h.get("cfm_inference_shot_aggregation", "mean")).lower()
+        if self.cfm_inference_shot_aggregation not in {"mean", "median"}:
+            raise ValueError(
+                "model.cfm_inference_shot_aggregation must be one of: mean, median; "
+                f"got {self.cfm_inference_shot_aggregation!r}."
+            )
         self.cfm_inference_start_noise_scale = float(h.get("cfm_inference_start_noise_scale", 0.0))
         self.cfm_train_noise_scale = float(h.get("cfm_train_noise_scale", 0.05))
         self.cfm_zero_start_prob = float(h.get("cfm_zero_start_prob", 0.5))
@@ -1013,13 +1019,24 @@ class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
             residual = residual + dt * self.residual_flow(residual, condition, t)
         return residual
 
+    def _aggregate_inference_shots(self, shots):
+        if self.cfm_inference_shot_aggregation == "mean":
+            return shots.mean(dim=0)
+        sorted_shots = shots.sort(dim=0).values
+        shot_count = sorted_shots.shape[0]
+        mid = shot_count // 2
+        if shot_count % 2 == 1:
+            return sorted_shots[mid]
+        return 0.5 * (sorted_shots[mid - 1] + sorted_shots[mid])
+
     def _refine_from_base(self, noisy_audio, base_restored, baseline_hat=None):
         condition = self._flow_condition(noisy_audio, base_restored, baseline_hat=baseline_hat)
         if self.cfm_inference_shots > 1 and not self.training:
             flow_hat = torch.stack(
                 [self._integrate_residual_flow(condition) for _ in range(self.cfm_inference_shots)],
                 dim=0,
-            ).mean(dim=0)
+            )
+            flow_hat = self._aggregate_inference_shots(flow_hat)
         else:
             flow_hat = self._integrate_residual_flow(condition)
         clean_delta_hat = flow_hat[:, 0:1]
