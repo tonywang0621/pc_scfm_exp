@@ -1,0 +1,3028 @@
+lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience
+完整模型結構、重要訓練參數、訓練設定報告
+====================================================================================================
+產生時間: 2026-09-15T10:25:33
+專案路徑: /mnt/c/Users/中研院/rl_exp
+設定檔: /mnt/c/Users/中研院/rl_exp/src/configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience.yaml
+
+0. 注意事項
+----------------------------------------------------------------------------------------------------
+目前這個 shell 的 python3 沒有 torch/omegaconf，因此本報告沒有執行 PyTorch instantiate，也沒有列出 runtime repr(model) 或實際參數量。
+本報告改由 YAML + 原始碼靜態解析產生，並附上完整關鍵類別原始碼片段，可直接追溯模型結構。
+
+1. 實驗與模型識別
+----------------------------------------------------------------------------------------------------
+exp_name: lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience__qtdb_train_qtdb_test__nv1__seed42
+model_name: lstm_dualpath_dapp_cfm_unet_bd_ecg
+root_dir: ../runs/mecge_table1_repro/lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience
+checkpoint_dir: ${root_dir}/checkpoint
+results_dir: ${root_dir}/results
+log_dir: ${root_dir}/log
+seed: 42
+註冊與繼承鏈:
+  @register_model("lstm_dualpath_dapp_cfm_unet_bd_ecg")
+  LSTMDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+    -> MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+    -> ECGDenoisingModel
+  __init__ 內建立 core = UNetResidualFlowDualPathDAPPMambAttentionCore({"model": kwargs}, block_cls=LightweightLSTMContextBlock)
+
+2. 架構重點摘要
+----------------------------------------------------------------------------------------------------
+輸入/任務: single-lead ECG baseline wander denoising；輸入 window_size=512，resample_hz=360。
+時頻轉換: STFT，n_fft=64, hop_size=8, win_size=64, compress_factor=0.3。
+主幹: DenseEncoder -> 3 個 LightweightLSTMContextBlock。每個 block 分別沿 time 軸與 frequency 軸跑 bidirectional LSTM，hidden=24，並搭配 residual dilated conv context。
+DAPP: use_dapp=true，time scales=[5,9,15,25]，freq scales=[1,2]，作用在 encoded feature。
+解碼: mask_decoder 產生 magnitude mask；phase_decoder 因 fea="pha" 產生 phase；ISTFT 回 time domain 得 direct_restored。
+Dual noise head: Conv2d -> InstanceNorm2d -> PReLU -> Conv2d(2 channels)，輸出 baseline_hat 與 residual_delta_hat。
+CFM/UNet refine: ConditionalResidualFlowUNetRefiner1d，state_channels=2，output_channels=2，condition_channels=6，base_channels=32，channel_mults=[1,2,4]，use_attention=false。
+Baseline dominant: cfm_baseline_delta_budget=0.95，cfm_baseline_gate_init=0.12，cfm_baseline_gate_max=0.44；clean delta budget=0.08。
+
+3. 重要模型超參數
+----------------------------------------------------------------------------------------------------
+fea: pha
+norm: False
+dense_channel: 32
+compress_factor: 0.3
+num_tscblocks: 3
+lstm_hidden: 24
+lstm_dropout: 0.04
+attention_position: before_mamba
+attention_num_blocks: 3
+attention_replacement: residual_dilated_conv
+attention_conv_kernel_size: 7
+attention_conv_dilations: [1, 2, 4, 8]
+attention_conv_dropout: 0.03
+use_time_attention: True
+use_freq_attention: True
+time_frequency_transform: stft
+learnable_frft_order: False
+use_dapp: True
+dapp_time_scales: [5, 9, 15, 25]
+dapp_freq_scales: [1, 2]
+dual_noise_head_hidden: 32
+residual_refine_scale: 0.22
+baseline_kernel_size: 129
+sampling_rate: 360
+n_fft: 64
+hop_size: 8
+win_size: 64
+beta: 2
+loss_fn: time+mse+com+con+dual_noise+lf+morph+cfm+noise_aux
+lambda_mse: 0.95
+lambda_dual_baseline: 0.3
+lambda_dual_residual: 0.008
+lambda_lf: 0.035
+lambda_morph: 0.04
+cfm_channels: 32
+cfm_blocks: 6
+cfm_time_dim: 96
+cfm_groups: 8
+cfm_dropout: 0.06
+cfm_dilations: [1, 2, 4, 8]
+cfm_inference_steps: 1
+cfm_use_adaptive_gate: True
+cfm_gate_hidden: 24
+cfm_clean_delta_budget: 0.08
+cfm_baseline_delta_budget: 0.95
+cfm_project_baseline_delta: True
+cfm_clean_lowpass_keep: 0.1
+cfm_train_noise_scale: 0.05
+cfm_zero_start_prob: 0.5
+cfm_bridge_noise_scale: 0.02
+cfm_refine_gate_init: 0.02
+cfm_refine_gate_max: 0.1
+cfm_baseline_gate_init: 0.12
+cfm_baseline_gate_max: 0.44
+cfm_consistency_blend_init: 0.15
+cfm_consistency_blend_max: 0.35
+cfm_stft_configs: [[32, 4, 32], [64, 8, 64], [128, 16, 128]]
+lambda_cfm: 0.04
+lambda_cfm_baseline: 0.13
+lambda_cfm_recon: 0.72
+lambda_cfm_stft: 0.01
+lambda_cfm_lf: 0.035
+lambda_cfm_deriv: 0.03
+lambda_cfm_residual_smooth: 0.04
+lambda_cfm_clean_baseline_consistency: 0.12
+cfm_unet_base_channels: 32
+cfm_unet_channel_mults: [1, 2, 4]
+cfm_unet_time_dim: 96
+cfm_unet_pool_scales: [3, 5, 9, 15]
+cfm_unet_use_attention: False
+cfm_unet_attention_heads: 2
+cfm_unet_mid_dilations: [1, 2, 4, 8]
+cfm_unet_aux_channels: 2
+lambda_ecg_noise_aux: 0.0
+lambda_gaussian_noise_aux: 0.0
+gaussian_aux_scale: 0.2
+
+4. 訓練參數與設定
+----------------------------------------------------------------------------------------------------
+train_epochs: 30
+batch_size: 64
+lr: 5e-05
+optimizer: AdamW
+betas: [0.8, 0.99]
+scheduler: ReduceLROnPlateau
+factor: 0.5
+lr_scheduler_patience_epochs: 5
+lr_scheduler_min_delta: 0.0001
+min_lr: 1e-07
+grad_clip_norm: 0.5
+eval_every_epochs: 1
+validation_metrics_every_epochs: 1
+save_every_epochs: 5
+early_stopping_patience_epochs: 0
+early_stopping_min_delta: 0.0001
+selection_metric: val_loss
+progress_bar: True
+resume: False
+resume_checkpoint: None
+init_checkpoint: None
+
+訓練行為重點:
+- optimizer: AdamW，lr=5e-5，betas=[0.8,0.99]，weight_decay 未設定時為 0。
+- scheduler: ReduceLROnPlateau，mode=min，factor=0.5，patience=5，threshold=1e-4，min_lr=1e-7。
+- total_steps = train_epochs * len(train_loader)，此 config 未設定 train_iterations。
+- eval_every_epochs=1，validation_metrics_every_epochs=1，因此每個 epoch 做 validation 與 metrics。
+- save_every_epochs=5，會按 step 儲存 model_step_{step}.pt，最後儲存 model_last.pt。
+- selection_metric=val_loss，因此 final evaluation 使用 best_model.pt/best_loss。
+- early_stopping_patience_epochs=0，在 train_supervised.py 中代表 early stopping disabled。
+- grad_clip_norm=0.5，訓練每步會做 clip_grad_norm_。
+
+5. Dataset / Evaluation 設定
+----------------------------------------------------------------------------------------------------
+dataset:
+  name: ecg_baseline_wander
+  data_dir: ${data_dir}
+  pkl_file: ${data_dir}/raw/dataset_bw_nv1.pkl
+  pkl_validation_ratio: 0.3
+  pkl_validation_random_state: 1
+  train_dataset: qtdb
+  external_test_datasets: []
+  test_label: qtdb_pkl_test
+  lead: single
+  split:
+    strategy: mecge_official_pkl
+    patient_wise: false
+    ratio:
+    - 0.7
+    - 0.3
+    - 0.0
+  resample_hz: 360
+  window_size: 512
+  overlap_ratio: 0.0
+  normalization: mecge_official_pkl
+  baseline_wander:
+    train_source: mecge_official_pkl
+    alpha_mode: peak_to_peak_ratio
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
+    alpha_values:
+    - 0.2
+    - 2.0
+    robustness_alpha_values:
+    - 0.2
+    - 0.6
+    - 1.0
+    - 1.5
+    - 2.0
+    test_types:
+    - nstdb
+  eps: 1.0e-10
+evaluation:
+  low_frequency_high_hz: 0.5
+
+
+6. 訓練輸出與 checkpoint 搜尋結果
+----------------------------------------------------------------------------------------------------
+YAML root_dir 使用 ../runs；實際路徑取決於 train_supervised.py 的執行工作目錄。
+若從 src 執行，root_dir 約為: /mnt/c/Users/中研院/rl_exp/runs/mecge_table1_repro/lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience
+若從專案根目錄執行，root_dir 約為: /mnt/c/Users/中研院/runs/mecge_table1_repro/lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience
+找到下列相關路徑:
+/mnt/c/Users/中研院/rl_exp/src/configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience.yaml
+/mnt/c/Users/中研院/rl_exp/src/configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only.yaml
+/mnt/c/Users/中研院/rl_exp/src/configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow.yaml
+
+7. 完整 YAML 設定原文
+----------------------------------------------------------------------------------------------------
+data_dir: "../data/mecge_table1_repro"
+root_dir: "../runs/mecge_table1_repro/lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience"
+
+checkpoint_dir: "${root_dir}/checkpoint"
+results_dir: "${root_dir}/results"
+log_dir: "${root_dir}/log"
+
+exp_name: lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience__qtdb_train_qtdb_test__nv1__seed42
+model_name: lstm_dualpath_dapp_cfm_unet_bd_ecg
+seed: 42
+log_tensorboard: True
+log_config: False
+log_model_architecture: False
+
+training:
+  train_epochs: 30
+  batch_size: 64
+  lr: 5.0e-5
+  optimizer: AdamW
+  betas: [0.8, 0.99]
+  scheduler: ReduceLROnPlateau
+  factor: 0.5
+  lr_scheduler_patience_epochs: 5
+  lr_scheduler_min_delta: 1.0e-4
+  min_lr: 1.0e-7
+  grad_clip_norm: 0.5
+  eval_every_epochs: 1
+  validation_metrics_every_epochs: 1
+  save_every_epochs: 5
+  early_stopping_patience_epochs: 0
+  early_stopping_min_delta: 1.0e-4
+  selection_metric: val_loss
+  progress_bar: True
+  resume: False
+  resume_checkpoint: null
+  init_checkpoint: null
+
+evaluation:
+  low_frequency_high_hz: 0.5
+
+dataset:
+  name: ecg_baseline_wander
+  data_dir: "${data_dir}"
+  pkl_file: "${data_dir}/raw/dataset_bw_nv1.pkl"
+  pkl_validation_ratio: 0.3
+  pkl_validation_random_state: 1
+  train_dataset: qtdb
+  external_test_datasets: []
+  test_label: qtdb_pkl_test
+  lead: single
+  split:
+    strategy: mecge_official_pkl
+    patient_wise: false
+    ratio: [0.7, 0.3, 0.0]
+  resample_hz: 360
+  window_size: 512
+  overlap_ratio: 0.0
+  normalization: mecge_official_pkl
+  baseline_wander:
+    train_source: mecge_official_pkl
+    alpha_mode: peak_to_peak_ratio
+    noise_sampling: deepfilter
+    alpha_sampling: integer_percent_uniform
+    alpha_values: [0.2, 2.0]
+    robustness_alpha_values: [0.2, 0.6, 1.0, 1.5, 2.0]
+    test_types:
+      - nstdb
+  eps: 1.0e-10
+
+model:
+  fea: "pha"
+  norm: False
+  dense_channel: 32
+  compress_factor: 0.3
+  num_tscblocks: 3
+  d_state: 8
+  d_conv: 8
+  expand: 2
+  lstm_hidden: 24
+  lstm_dropout: 0.04
+  norm_epsilon: 1.0e-5
+  attention_position: "before_mamba"
+  attention_num_blocks: 3
+  attention_replacement: "residual_dilated_conv"
+  attention_conv_kernel_size: 7
+  attention_conv_dilations: [1, 2, 4, 8]
+  attention_conv_dropout: 0.03
+  use_time_attention: true
+  use_freq_attention: true
+  time_frequency_transform: "stft"
+  learnable_frft_order: false
+  use_dapp: true
+  dapp_time_scales: [5, 9, 15, 25]
+  dapp_freq_scales: [1, 2]
+  dual_noise_head_hidden: 32
+  residual_refine_scale: 0.22
+  baseline_kernel_size: 129
+  sampling_rate: 360
+  n_fft: 64
+  hop_size: 8
+  win_size: 64
+  beta: 2
+  loss_fn: "time+mse+com+con+dual_noise+lf+morph+cfm+noise_aux"
+  lambda_mse: 0.95
+  lambda_dual_baseline: 0.30
+  lambda_dual_residual: 0.008
+  lambda_lf: 0.035
+  lambda_morph: 0.04
+  cfm_channels: 32
+  cfm_blocks: 6
+  cfm_time_dim: 96
+  cfm_groups: 8
+  cfm_dropout: 0.06
+  cfm_dilations: [1, 2, 4, 8]
+  cfm_inference_steps: 1
+  cfm_use_adaptive_gate: true
+  cfm_gate_hidden: 24
+  cfm_clean_delta_budget: 0.08
+  cfm_baseline_delta_budget: 0.95
+  cfm_project_baseline_delta: true
+  cfm_clean_lowpass_keep: 0.10
+  cfm_train_noise_scale: 0.05
+  cfm_zero_start_prob: 0.5
+  cfm_bridge_noise_scale: 0.02
+  cfm_refine_gate_init: 0.02
+  cfm_refine_gate_max: 0.10
+  cfm_baseline_gate_init: 0.12
+  cfm_baseline_gate_max: 0.44
+  cfm_consistency_blend_init: 0.15
+  cfm_consistency_blend_max: 0.35
+  cfm_stft_configs:
+    - [32, 4, 32]
+    - [64, 8, 64]
+    - [128, 16, 128]
+  lambda_cfm: 0.04
+  lambda_cfm_baseline: 0.13
+  lambda_cfm_recon: 0.72
+  lambda_cfm_stft: 0.01
+  lambda_cfm_lf: 0.035
+  lambda_cfm_deriv: 0.03
+  lambda_cfm_residual_smooth: 0.04
+  lambda_cfm_clean_baseline_consistency: 0.12
+  cfm_unet_base_channels: 32
+  cfm_unet_channel_mults: [1, 2, 4]
+  cfm_unet_time_dim: 96
+  cfm_unet_pool_scales: [3, 5, 9, 15]
+  cfm_unet_use_attention: false
+  cfm_unet_attention_heads: 2
+  cfm_unet_mid_dilations: [1, 2, 4, 8]
+  cfm_unet_aux_channels: 2
+  lambda_ecg_noise_aux: 0.00
+  lambda_gaussian_noise_aux: 0.0
+  gaussian_aux_scale: 0.2
+
+
+8. 相關訓練程式碼
+----------------------------------------------------------------------------------------------------
+# train_supervised.py:40-68 def _build_optimizer
+def _build_optimizer(model, training_args):
+    optimizer_name = str(training_args.get("optimizer", "AdamW")).lower()
+    lr = float(training_args.lr)
+    betas = tuple(training_args.get("betas", [0.8, 0.99]))
+    weight_decay = float(training_args.get("weight_decay", 0.0))
+
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=lr,
+            betas=betas,
+            weight_decay=weight_decay,
+        )
+    if optimizer_name == "adam":
+        return torch.optim.Adam(
+            model.parameters(),
+            lr=lr,
+            betas=betas,
+            weight_decay=weight_decay,
+        )
+    if optimizer_name == "radam":
+        # EDDM paper-faithful optimizer (Li et al. 2025, Section IV-C2).
+        return torch.optim.RAdam(
+            model.parameters(),
+            lr=lr,
+            betas=betas,
+            weight_decay=weight_decay,
+        )
+    raise ValueError(f"Unsupported optimizer: {training_args.get('optimizer')}")
+
+# train_supervised.py:71-104 def _build_scheduler
+def _build_scheduler(optimizer, training_args):
+    scheduler_name = str(training_args.get("scheduler", "ExponentialLR"))
+    scheduler_key = scheduler_name.lower()
+
+    if scheduler_key in {"none", "null", "constantlr"}:
+        return _NullScheduler()
+    if scheduler_key == "exponentiallr":
+        return torch.optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=float(training_args.get("gamma", 0.99))
+        )
+    if scheduler_key == "steplr":
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=int(training_args.get("step_size", 200)),
+            gamma=float(training_args.get("gamma", 0.5)),
+        )
+    if scheduler_key in {"reducelronplateau", "plateau"}:
+        # DeepFilter paper-faithful schedule (Romero et al. 2021 / official
+        # fperdigon/DeepFilter train_dl()): halve lr after `patience` epochs
+        # without validation-loss improvement, down to a floor of min_lr.
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=float(training_args.get("factor", 0.5)),
+            threshold=float(training_args.get("lr_scheduler_min_delta", training_args.get("min_delta", 1.0e-4))),
+            threshold_mode="abs",
+            patience=int(
+                training_args.get(
+                    "lr_scheduler_patience_epochs", training_args.get("patience", 2)
+                )
+            ),
+            min_lr=float(training_args.get("min_lr", 0.0)),
+        )
+    raise ValueError(f"Unsupported scheduler: {training_args.get('scheduler')}")
+
+# train_supervised.py:107-116 def _scheduler_step
+def _scheduler_step(scheduler, metric=None):
+    """Step `scheduler`, routing the validation metric to ReduceLROnPlateau
+    schedulers (which require it) and ignoring it for epoch-based schedulers.
+    No-ops for ReduceLROnPlateau when no fresh metric is available yet.
+    """
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        if metric is not None:
+            scheduler.step(metric)
+        return
+    scheduler.step()
+
+# train_supervised.py:119-152 def _save_training_state
+def _save_training_state(
+    path,
+    model,
+    optimizer,
+    scheduler,
+    step,
+    best_val_loss,
+    best_val_pcc,
+    best_val_prd,
+    patience_counter,
+    train_losses,
+    val_losses,
+    val_pccs,
+    val_metric_history,
+    args,
+):
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "step": step,
+            "best_val_loss": best_val_loss,
+            "best_val_pcc": best_val_pcc,
+            "best_val_prd": best_val_prd,
+            "patience_counter": patience_counter,
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "val_pccs": val_pccs,
+            "val_metric_history": val_metric_history,
+            "config": OmegaConf.to_container(args, resolve=True),
+        },
+        path,
+    )
+
+# train_supervised.py:155-184 def _write_loss_history
+def _write_loss_history(path_prefix, train_losses, val_losses, val_pccs, eval_every):
+    def clean_value(values, idx):
+        if idx >= len(values):
+            return None
+        value = float(values[idx])
+        return None if np.isnan(value) else value
+
+    rows = []
+    total_rows = max(len(train_losses), len(val_losses), len(val_pccs))
+    for idx in range(total_rows):
+        row = {
+            "index": idx + 1,
+            "train_step": idx + 1,
+            "validation_step": (idx + 1) * eval_every,
+            "train_loss": clean_value(train_losses, idx),
+            "val_loss": clean_value(val_losses, idx),
+            "val_pcc": clean_value(val_pccs, idx),
+        }
+        rows.append(row)
+
+    csv_path = Path(f"{path_prefix}.csv")
+    json_path = Path(f"{path_prefix}.json")
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["index", "train_step", "validation_step", "train_loss", "val_loss", "val_pcc"])
+        writer.writeheader()
+        writer.writerows(rows)
+    with open(json_path, "w", encoding="utf-8") as handle:
+        json.dump(rows, handle, indent=2)
+    return csv_path, json_path
+
+# train_supervised.py:187-886 def train
+def train():     
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("--config", default="configs/ecg_baseline_wander_mecg_e.yaml")
+    known_args, remaining = parser.parse_known_args()
+
+    base_args = OmegaConf.load(known_args.config)
+    cli_args = OmegaConf.from_dotlist(remaining) # load command line overrides
+    args = OmegaConf.merge(base_args, cli_args)
+    START_TIME = time.time() 
+    separator = "-" * 100
+    
+    seed_everything(args.seed) 
+    exp_name = args.exp_name 
+    model_name = args.model_name 
+    writer = None 
+    metric_display_map = {
+        'SSD': 'SSD (↓)',
+        'MAD': 'MAD (↓)',
+        'PRD': 'PRD % (↓)',
+        'CosSim': 'CosSim (↑)',
+        'Output_SNR_dB': 'Output SNR dB (↑)',
+        'SNR_Improvement_dB': 'SNR Improvement dB (↑)',
+        'LF_Reduction_dB': 'LF Reduction dB (↑)',
+        'R_Peak_Timing_Error_ms': 'R-Peak Timing Error ms (↓)',
+        'RR_Interval_MAE_ms': 'RR Interval MAE ms (↓)',
+        'RMSE': 'RMSE (↓)',
+        'Centered_CosSim': 'Centered CosSim (↑)',
+        'QRS_Amplitude_Error': 'QRS Amplitude Error (↓)',
+        'Parameters': 'Parameters',
+        'Trainable_Parameters': 'Trainable Parameters',
+        'FLOPs': 'FLOPs',
+        'Inference_Time_ms': 'Inference Time ms',
+        'Peak_Memory_MB': 'Peak Memory MB',
+    }
+    
+    # Build a run tag from loss weights so each parameter combination gets its own dir
+    _W_KEYS   = ['mse_w', 'pcc_w', 'spec_mag_w', 'spec_phase_w', 'grad_w', 'amp_w',
+                 'stft_w', 'inst_phase_w', 'xcorr_lag_w', 'stft_mag_w', 'env_w']
+    _W_ABBREV = {'mse_w': 'mse', 'pcc_w': 'pcc', 'spec_mag_w': 'smag',
+                 'spec_phase_w': 'sph', 'grad_w': 'grad', 'amp_w': 'amp',
+                 'stft_w': 'stft', 'inst_phase_w': 'iphase', 'xcorr_lag_w': 'xclag',
+                 'stft_mag_w': 'stftmag', 'env_w': 'env'}
+    model_cfg_flat = OmegaConf.to_container(args.model, resolve=True)
+    weight_parts = [f"{_W_ABBREV[k]}{model_cfg_flat[k]}" for k in _W_KEYS if k in model_cfg_flat and model_cfg_flat[k] != 0]
+    run_tag = "_".join(weight_parts)  # e.g. "mse0.1_pcc2.0_smag0.3_sph0.5_grad1.5_amp0.5"
+
+    # setup directories — each unique weight combination gets its own subdirectory
+    sub = Path(model_name) / run_tag if run_tag else Path(model_name)
+    checkpoint_dir = Path(args.checkpoint_dir) / exp_name / sub
+    results_dir    = Path(args.results_dir)    / exp_name / sub
+    log_dir        = Path(args.log_dir)        / exp_name / sub
+
+    resume = bool(args.training.get("resume", False))
+    resume_checkpoint_value = args.training.get("resume_checkpoint", None)
+    resume_checkpoint = (
+        Path(resume_checkpoint_value)
+        if resume_checkpoint_value
+        else checkpoint_dir / "training_state.pt"
+    )
+
+    # delete only the current run's directory (not siblings from other weight combos)
+    if not resume:
+        for path in [checkpoint_dir, results_dir, log_dir]:
+            if path.exists():
+                shutil.rmtree(path)
+    
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)    
+    
+    # print config 
+    logger = setup_logger(args, log_dir) 
+    if args.get("log_config", False):
+        logger.info("\n"+"-"*30+"Running with configs"+"-"*30+"\n")
+        logger.info(yaml.dump(OmegaConf.to_container(args, resolve=True), indent=4))
+        logger.info(separator+"\n")
+    else:
+        logger.info(
+            f"Run: exp_name={exp_name} | model_name={model_name} | "
+            f"train_epochs={args.training.get('train_epochs', 'step_override')} | "
+            f"batch_size={args.training.batch_size}"
+        )
+    
+    # setup tensorboard 
+    if args.get('log_tensorboard', True):
+        tb_dir = checkpoint_dir / "tensorboard_logs"
+        tb_dir.mkdir(parents=True, exist_ok=True)
+        writer = SummaryWriter(log_dir=tb_dir)
+        logger.info(f"TensorBoard logging enabled. Logs will be saved to {tb_dir}")
+        
+    requested_device = args.get("device", None)
+    device = torch.device(requested_device if requested_device else ('cuda:0' if torch.cuda.is_available() else 'cpu'))
+    logger.info(f'Using device {device}')
+    # print(f'Using device {device}')
+    
+    # model_configs = OmegaConf.load(args.model_config_path) 
+    # model_kwargs = OmegaConf.to_container(model_configs, resolve=True)  
+    # logger.info("\n"+"-"*30+"Model configs"+"-"*30+"\n")
+    # logger.info(yaml.dump(model_kwargs, indent=4)) 
+    # logger.info(separator+"\n")
+    model_kwargs = OmegaConf.to_container(args.model, resolve=True)
+    model = get_model(args['model_name'], **model_kwargs).to(device) 
+
+    init_checkpoint_value = args.training.get("init_checkpoint", None)
+    if init_checkpoint_value and not resume:
+        init_checkpoint = Path(init_checkpoint_value)
+        if not init_checkpoint.exists():
+            raise FileNotFoundError(f"training.init_checkpoint was not found: {init_checkpoint}")
+        init_state = torch.load(init_checkpoint, map_location=device)
+        if isinstance(init_state, dict) and "model_state_dict" in init_state:
+            init_state = init_state["model_state_dict"]
+        load_result = model.load_state_dict(init_state)
+        logger.info(
+            f"Initialized model weights from {init_checkpoint} | "
+            f"missing_keys={len(load_result.missing_keys)} | "
+            f"unexpected_keys={len(load_result.unexpected_keys)}"
+        )
+
+    optimizer = _build_optimizer(model, args.training)
+    scheduler = _build_scheduler(optimizer, args.training)
+    logger.info(
+        f"Optimizer: {args.training.get('optimizer', 'AdamW')} | "
+        f"lr={args.training.lr} | betas={list(args.training.get('betas', [0.8, 0.99]))} | "
+        f"weight_decay={args.training.get('weight_decay', 0.0)}"
+    )
+    logger.info(
+        f"Scheduler: {args.training.get('scheduler', 'ExponentialLR')} | "
+        f"gamma={args.training.get('gamma', 'n/a')} | "
+        f"step_size={args.training.get('step_size', 'n/a')} | "
+        f"factor={args.training.get('factor', 'n/a')} | "
+        f"lr_scheduler_patience_epochs={args.training.get('lr_scheduler_patience_epochs', 'n/a')} | "
+        f"min_lr={args.training.get('min_lr', 'n/a')}"
+    )
+    if args.get("log_model_architecture", False):
+        logger.info("\n"+"-"*30+"Model Architecture"+"-"*30+"\n")
+        logger.info(f'{model}\n')
+    logger.info(f'model size: {sum(param.numel() for param in model.parameters())} parameters')
+
+    dataset_kwargs = OmegaConf.to_container(args.dataset, resolve=True)
+    train_dataset = get_dataset(data_mode='train', **dataset_kwargs) 
+    val_dataset = get_dataset(data_mode='val', **dataset_kwargs) 
+    test_dataset = get_dataset(data_mode='test', **dataset_kwargs) 
+    num_workers = int(args.training.get("num_workers", 4))
+    train_drop_last = bool(args.training.get("train_drop_last", False))
+    val_drop_last = bool(args.training.get("val_drop_last", False))
+    test_batch_size = int(args.training.get("test_batch_size", args.training.batch_size))
+    
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=args.training.batch_size, 
+        shuffle=True, 
+        drop_last=train_drop_last,
+        num_workers=num_workers,
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=args.training.batch_size, 
+        shuffle=False, 
+        drop_last=val_drop_last,
+        num_workers=num_workers,
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=test_batch_size,
+        shuffle=False, 
+        num_workers=num_workers,
+    )
+    # print(f'data loaders sucessfully loaded')
+    logger.info(f'data loaders sucessfully loaded')
+    logger.info("\n"+"-"*30+"Begin Training"+"-"*30+"\n")
+
+    # training
+    steps_per_epoch = len(train_loader)
+    if steps_per_epoch == 0:
+        raise ValueError("Train loader is empty; cannot start training.")
+    train_epochs = int(args.training.get("train_epochs", 30))
+    if args.training.get("train_iterations", None) is not None:
+        total_steps = int(args.training.train_iterations)
+        train_epochs = int(np.ceil(total_steps / steps_per_epoch))
+    else:
+        total_steps = train_epochs * steps_per_epoch
+    eval_every_epochs = int(args.training.get("eval_every_epochs", 1))
+    validation_metrics_every_epochs = int(
+        args.training.get("validation_metrics_every_epochs", eval_every_epochs)
+    )
+    save_every_epochs = int(args.training.get("save_every_epochs", 0))
+    step_based_schedule = (
+        args.training.get("train_iterations", None) is not None
+        and args.training.get("eval_every", None) is not None
+    )
+    if step_based_schedule:
+        eval_every_steps = max(int(args.training.eval_every), 1)
+        validation_metrics_every_steps = max(
+            int(args.training.get("validation_metrics_every", eval_every_steps)),
+            eval_every_steps,
+        )
+        save_every_steps = int(args.training.get("save_every", 0))
+    else:
+        eval_every_steps = max(eval_every_epochs * steps_per_epoch, 1)
+        validation_metrics_every_steps = max(
+            validation_metrics_every_epochs * steps_per_epoch,
+            eval_every_steps,
+        )
+        save_every_steps = save_every_epochs * steps_per_epoch if save_every_epochs else 0
+    logger.info(
+        "Training schedule: "
+        f"train_epochs={train_epochs} | total_steps={total_steps} | "
+        f"steps_per_epoch={steps_per_epoch} | eval_every_epochs={eval_every_epochs}"
+    )
+
+    train_losses, val_losses = [], []
+    val_pccs = []
+    val_metric_history = []
+    best_val_loss = np.inf
+    best_val_pcc = -np.inf
+    best_val_prd = np.inf
+    best_model_ckpt = checkpoint_dir / 'best_model.pt'
+    best_pcc_model_ckpt = checkpoint_dir / 'best_pcc_model.pt'
+    best_prd_model_ckpt = checkpoint_dir / 'best_prd_model.pt'
+    training_state_ckpt = checkpoint_dir / 'training_state.pt'
+    skip_training = not bool(getattr(model, "requires_training", True))
+
+    selection_metric = str(args.training.get("selection_metric", "val_loss")).lower()
+    if selection_metric not in {"val_pcc", "val_loss", "val_prd"}:
+        raise ValueError("training.selection_metric must be 'val_pcc', 'val_loss', or 'val_prd'.")
+    patience = args.training.get(
+        'early_stopping_patience_epochs',
+        args.training.get('early_stopping_patience', 8),
+    )
+    early_stopping_enabled = patience not in {None, False, "none", "None", "null", "Null", 0}
+    patience = int(patience) if early_stopping_enabled else 0
+    min_delta = float(args.training.get('early_stopping_min_delta', 0.0))
+    patience_counter = 0
+    stop_training = False
+
+    # Per-model gradient-norm clipping. Diffusion baselines (DeScoD-ECG) clip
+    # at 1.0 in their released code; the DeepFilter-family Keras models and
+    # MECG-E do not clip at all. Default 1.0; set training.grad_clip_norm to
+    # null / 0 to disable.
+    grad_clip_norm = args.training.get('grad_clip_norm', 1.0)
+    grad_clip_norm = (
+        float(grad_clip_norm)
+        if grad_clip_norm not in {None, False, "none", "None", "null", "Null", 0, 0.0}
+        else None
+    )
+
+    step = 0
+    running_train_loss = 0
+    running_train_steps = 0
+
+    if skip_training:
+        logger.info("Model is a fixed baseline; skipping optimization and evaluating directly.")
+        torch.save(model.state_dict(), best_pcc_model_ckpt)
+        torch.save(model.state_dict(), best_model_ckpt)
+        torch.save(model.state_dict(), checkpoint_dir / 'model_last.pt')
+        _save_training_state(
+            training_state_ckpt,
+            model,
+            optimizer,
+            scheduler,
+            0,
+            best_val_loss,
+            best_val_pcc,
+            best_val_prd,
+            patience_counter,
+            train_losses,
+            val_losses,
+            val_pccs,
+            val_metric_history,
+            args,
+        )
+    elif resume:
+        if not resume_checkpoint.exists():
+            raise FileNotFoundError(
+                f"training.resume=True but resume checkpoint was not found: {resume_checkpoint}"
+            )
+        state = torch.load(resume_checkpoint, map_location=device)
+        model.load_state_dict(state["model_state_dict"])
+        optimizer.load_state_dict(state["optimizer_state_dict"])
+        scheduler.load_state_dict(state["scheduler_state_dict"])
+        step = int(state.get("step", 0))
+        best_val_loss = float(state.get("best_val_loss", best_val_loss))
+        best_val_pcc = float(state.get("best_val_pcc", best_val_pcc))
+        best_val_prd = float(state.get("best_val_prd", best_val_prd))
+        patience_counter = int(state.get("patience_counter", patience_counter))
+        train_losses = list(state.get("train_losses", train_losses))
+        val_losses = list(state.get("val_losses", val_losses))
+        val_pccs = list(state.get("val_pccs", val_pccs))
+        val_metric_history = list(state.get("val_metric_history", val_metric_history))
+        logger.info(f"Resumed training from {resume_checkpoint} at step {step}.")
+        if early_stopping_enabled and patience_counter >= patience:
+            logger.info(
+                f"Resume checkpoint already reached early stopping patience "
+                f"({patience_counter}/{patience}); skipping training and running final evaluation."
+            )
+            stop_training = True
+
+    progress_bar = tqdm(
+        total=total_steps,
+        initial=step,
+        desc=f"Training {model_name}",
+        unit="step",
+        dynamic_ncols=True,
+        disable=skip_training or not args.training.get("progress_bar", True),
+    )
+
+    try:
+        while not skip_training and step < total_steps and not stop_training:
+            model.train()
+
+            for train_batch in train_loader:
+                optimizer.zero_grad()
+                train_loss = model.compute_loss(train_batch, device)
+                if not torch.isfinite(train_loss):
+                    raise FloatingPointError(
+                        f"Non-finite training loss at step {step + 1}: {train_loss.item()}. "
+                        "Lower the learning rate or loss weights before rerunning this experiment."
+                    )
+                train_loss.backward()
+                if grad_clip_norm is not None:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_norm)
+                    if not torch.isfinite(grad_norm):
+                        raise FloatingPointError(
+                            f"Non-finite gradient norm at step {step + 1}: {grad_norm.item()}. "
+                            "The current model/loss recipe is numerically unstable on this batch."
+                        )
+                optimizer.step()
+
+                running_train_loss += train_loss.item()
+                running_train_steps += 1
+                current_step = step + 1
+                current_epoch = int(np.ceil(current_step / steps_per_epoch))
+                epoch_finished = current_step % steps_per_epoch == 0
+                eval_due = current_step % eval_every_steps == 0 if step_based_schedule else (
+                    epoch_finished and current_step % eval_every_steps == 0
+                )
+
+                # evaluation
+                if eval_due:
+                    model.eval()
+                    val_pcc_batches = []
+                    last_metrics_step = int(val_metric_history[-1]["step"]) if val_metric_history else None
+                    metrics_due = (
+                        last_metrics_step is None
+                        or current_step - last_metrics_step >= validation_metrics_every_steps
+                    )
+                    loss_due = metrics_due or selection_metric == "val_loss"
+                    avg_val_loss = None
+                    val_noisy_batches, val_clean_batches, val_pred_batches = [], [], []
+
+                    with torch.no_grad():
+                        for val_batch in val_loader:
+                            noisy = val_batch[0].to(device)
+                            clean = val_batch[1].to(device)
+                            pred = model(noisy)
+                            if not torch.isfinite(pred).all():
+                                raise FloatingPointError(
+                                    f"Non-finite validation prediction at step {current_step}. "
+                                    "The checkpoint would produce NaN/Inf reconstruction metrics."
+                                )
+                            pred_c = pred - pred.mean(dim=-1, keepdim=True)
+                            clean_c = clean - clean.mean(dim=-1, keepdim=True)
+                            pcc = (pred_c * clean_c).sum(dim=-1) / (
+                                pred_c.norm(dim=-1) * clean_c.norm(dim=-1) + 1e-8
+                            )
+                            val_pcc_batches.append(pcc)
+                            if metrics_due:
+                                val_noisy_batches.append(noisy.detach().cpu().numpy())
+                                val_clean_batches.append(clean.detach().cpu().numpy())
+                                val_pred_batches.append(pred.detach().cpu().numpy())
+
+                    avg_val_pcc = torch.cat([batch.flatten() for batch in val_pcc_batches]).mean().item()
+                    val_metrics = None
+                    if loss_due:
+                        avg_val_loss = 0
+                        for val_batch in val_loader:
+                            val_loss = model.compute_loss(val_batch, device)
+                            if not torch.isfinite(val_loss):
+                                raise FloatingPointError(
+                                    f"Non-finite validation loss at step {current_step}: {val_loss.item()}."
+                                )
+                            avg_val_loss += val_loss.item()
+                        avg_val_loss /= len(val_loader)
+                    if metrics_due:
+                        fs = args.dataset.get("resample_hz", args.model.get("sampling_rate", 250))
+                        low_freq_hz = args.get("evaluation", {}).get("low_frequency_high_hz", 0.5)
+                        val_metrics = reconstruction_metrics_from_arrays(
+                            np.concatenate(val_noisy_batches, axis=0),
+                            np.concatenate(val_clean_batches, axis=0),
+                            np.concatenate(val_pred_batches, axis=0),
+                            fs=fs,
+                            low_freq_hz=low_freq_hz,
+                            eps=args.dataset.eps,
+                            metric_protocol=args.get("evaluation", {}).get("metric_protocol", "default"),
+                        )
+                        val_metric_history.append(
+                            {
+                                "epoch": current_epoch,
+                                "step": current_step,
+                                "val_loss": avg_val_loss,
+                                **val_metrics,
+                            }
+                        )
+                        with open(checkpoint_dir / "validation_metrics.yaml", "w", encoding="utf-8") as f:
+                            yaml.safe_dump(val_metric_history, f, sort_keys=False)
+
+                    current_train_loss = running_train_loss / running_train_steps
+                    log_message = (
+                        f'Training epoch {current_epoch}/{train_epochs} '
+                        f'(step {current_step}/{total_steps}) | train loss: {current_train_loss:.4f} | '
+                        f'val PCC: {avg_val_pcc:.4f}'
+                    )
+                    if val_metrics is not None:
+                        log_message += (
+                            f' | val loss: {avg_val_loss:.4f} | '
+                            f'val PRD: {val_metrics["PRD"]:.4f} | '
+                            f'val SNR imp: {val_metrics["SNR_Improvement_dB"]:.4f} | '
+                            f'val LF red: {val_metrics["LF_Reduction_dB"]:.4f} | '
+                            f'val R-peak err: {val_metrics["R_Peak_Timing_Error_ms"]:.4f} ms | '
+                            f'val RR MAE: {val_metrics["RR_Interval_MAE_ms"]:.4f} ms'
+                        )
+                    logger.info(log_message)
+
+                    train_losses.append(current_train_loss)
+                    val_losses.append(avg_val_loss if avg_val_loss is not None else float("nan"))
+                    val_pccs.append(avg_val_pcc)
+
+                    if writer is not None:
+                        writer.add_scalar('Train/Loss', current_train_loss, current_step)
+                        writer.add_scalar('Val/PCC', avg_val_pcc, current_step)
+                        if avg_val_loss is not None:
+                            writer.add_scalar('Val/Loss', avg_val_loss, current_step)
+                        if val_metrics is not None:
+                            for key, value in val_metrics.items():
+                                writer.add_scalar(f'Val/{key}', value, current_step)
+
+                    pcc_improved = avg_val_pcc > best_val_pcc + min_delta
+                    loss_improved = avg_val_loss is not None and avg_val_loss < best_val_loss - min_delta
+                    prd_improved = (
+                        val_metrics is not None
+                        and val_metrics.get("PRD") is not None
+                        and val_metrics["PRD"] < best_val_prd - min_delta
+                    )
+
+                    if pcc_improved:
+                        logger.info(f'New best val PCC {avg_val_pcc:.4f} at epoch {current_epoch}! Saving model...')
+                        best_val_pcc = avg_val_pcc
+                        torch.save(model.state_dict(), best_pcc_model_ckpt)
+
+                    if loss_improved:
+                        logger.info(f'New best val loss {avg_val_loss:.4f} at epoch {current_epoch}! Saving model...')
+                        best_val_loss = avg_val_loss
+                        torch.save(model.state_dict(), best_model_ckpt)
+
+                    if prd_improved:
+                        logger.info(
+                            f'New best val PRD {val_metrics["PRD"]:.4f} at epoch {current_epoch}! Saving model...'
+                        )
+                        best_val_prd = val_metrics["PRD"]
+                        torch.save(model.state_dict(), best_prd_model_ckpt)
+                        if selection_metric == "val_prd":
+                            torch.save(model.state_dict(), best_model_ckpt)
+
+                    if selection_metric == "val_pcc":
+                        primary_improved = pcc_improved
+                        scheduler_metric = -avg_val_pcc
+                    elif selection_metric == "val_prd":
+                        primary_improved = prd_improved
+                        scheduler_metric = val_metrics["PRD"] if val_metrics is not None else None
+                    else:
+                        primary_improved = loss_improved
+                        scheduler_metric = avg_val_loss
+                    if primary_improved:
+                        patience_counter = 0
+                    elif early_stopping_enabled:
+                        patience_counter += 1
+                        logger.info(
+                            f"No {selection_metric} improvement. Patience: {patience_counter}/{patience}"
+                        )
+
+                    if early_stopping_enabled and patience_counter >= patience:
+                        logger.info(f'Early stopping triggered at epoch {current_epoch}.')
+                        torch.save(model.state_dict(), checkpoint_dir / 'model_last.pt')
+                        step = current_step
+                        progress_bar.update(1)
+                        _save_training_state(
+                            training_state_ckpt,
+                            model,
+                            optimizer,
+                            scheduler,
+                            step,
+                            best_val_loss,
+                            best_val_pcc,
+                            best_val_prd,
+                            patience_counter,
+                            train_losses,
+                            val_losses,
+                            val_pccs,
+                            val_metric_history,
+                            args,
+                        )
+                        stop_training = True
+                        break
+
+                    _save_training_state(
+                        training_state_ckpt,
+                        model,
+                        optimizer,
+                        scheduler,
+                        current_step,
+                        best_val_loss,
+                        best_val_pcc,
+                        best_val_prd,
+                        patience_counter,
+                        train_losses,
+                        val_losses,
+                        val_pccs,
+                        val_metric_history,
+                        args,
+                    )
+
+                    # Reset running training metrics
+                    running_train_loss = 0
+                    running_train_steps = 0
+                    model.train()
+                    _scheduler_step(scheduler, scheduler_metric)
+                elif epoch_finished:
+                    _scheduler_step(scheduler)
+
+                if save_every_steps and current_step % save_every_steps == 0:
+                    torch.save(model.state_dict(), checkpoint_dir / f'model_step_{current_step}.pt')
+                    _save_training_state(
+                        training_state_ckpt,
+                        model,
+                        optimizer,
+                        scheduler,
+                        current_step,
+                        best_val_loss,
+                        best_val_pcc,
+                        best_val_prd,
+                        patience_counter,
+                        train_losses,
+                        val_losses,
+                        val_pccs,
+                        val_metric_history,
+                        args,
+                    )
+
+                if current_step >= total_steps:
+                    logger.info(f'Saving last model')
+                    torch.save(model.state_dict(), checkpoint_dir / 'model_last.pt')
+                    step = current_step
+                    progress_bar.update(1)
+                    _save_training_state(
+                        training_state_ckpt,
+                        model,
+                        optimizer,
+                        scheduler,
+                        step,
+                        best_val_loss,
+                        best_val_pcc,
+                        best_val_prd,
+                        patience_counter,
+                        train_losses,
+                        val_losses,
+                        val_pccs,
+                        val_metric_history,
+                        args,
+                    )
+                    break
+
+                step = current_step
+                progress_bar.update(1)
+                progress_bar.set_postfix(
+                    epoch=f"{current_epoch}/{train_epochs}",
+                    train_loss=f"{train_loss.item():.4f}",
+                    patience=f"{patience_counter}/{patience}" if early_stopping_enabled else "disabled",
+                )
+    finally:
+        progress_bar.close()
+            
+    # print(f"Training complete after {(time.time()-START_TIME)/60:.2f} minutes. Best val loss: {best_val_loss:.4f}")
+    logger.info(
+        f"Training complete after {(time.time()-START_TIME)/60:.2f} minutes. "
+        f"Best val loss: {best_val_loss:.4f} | Best val PCC: {best_val_pcc:.4f} | "
+        f"Best val PRD: {best_val_prd:.4f} | "
+        f"selection_metric={selection_metric}"
+    )
+    # Final evaluation uses the configured paper/official-code selection metric.
+    if selection_metric == "val_pcc":
+        primary_ckpt_name = "best_pcc"
+        primary_ckpt_path = best_pcc_model_ckpt
+    elif selection_metric == "val_prd":
+        primary_ckpt_name = "best_prd"
+        primary_ckpt_path = best_prd_model_ckpt
+    else:
+        primary_ckpt_name = "best_loss"
+        primary_ckpt_path = best_model_ckpt
+    eval_checkpoints = [
+        (primary_ckpt_name, primary_ckpt_path),
+    ]
+
+    for ckpt_name, ckpt_path in eval_checkpoints:
+        if not ckpt_path.exists():
+            logger.info(f"\n{'='*30} Skipping {ckpt_name} model ({ckpt_path} not found) {'='*30}")
+            continue
+        logger.info(f"\n{'='*30} Evaluating {ckpt_name} model {'='*30}")
+        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+        model.eval()
+
+        eval_dir = results_dir / ckpt_name
+        if eval_dir.exists():
+            logger.info(f"Overwriting existing evaluation directory: {eval_dir}")
+            shutil.rmtree(eval_dir)
+        eval_dir.mkdir(parents=True, exist_ok=True)
+
+        loss_curve_path = plot_loss_curves(
+            train_losses, val_losses,
+            eval_every_epochs, eval_dir, val_pccs=val_pccs, x_axis_label="Training epoch",
+        )
+        logger.info(f"Saved loss curves to {loss_curve_path}")
+        history_csv, history_json = _write_loss_history(
+            eval_dir / "training_history",
+            train_losses,
+            val_losses,
+            val_pccs,
+            eval_every_epochs,
+        )
+        logger.info(f"Saved training history to {history_csv} and {history_json}")
+
+        fs = args.dataset.get("resample_hz", args.model.get("sampling_rate", 250))
+        low_freq_hz = args.get("evaluation", {}).get("low_frequency_high_hz", 0.5)
+        test_label = str(args.dataset.get("test_label", "ptbxl_fold10_test"))
+        eval_items = [(test_label, test_dataset, test_loader)]
+        for external_name in args.dataset.get("external_test_datasets", []):
+            try:
+                external_dataset = get_dataset(data_mode=external_name, **dataset_kwargs)
+            except FileNotFoundError as exc:
+                logger.info(f"Skipping external test dataset {external_name}: {exc}")
+                continue
+            external_loader = DataLoader(
+                external_dataset,
+                batch_size=test_batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+            )
+            eval_items.append((external_name, external_dataset, external_loader))
+
+        for eval_name, eval_dataset, _ in eval_items:
+            prediction_paths = plot_prediction_results(
+                model, eval_dataset, device, eval_dir,
+                num_samples=3, seed=args.seed, eps=args.dataset.eps, fs=fs,
+                filename_prefix=eval_name,
+            )
+            for prediction_path in prediction_paths:
+                logger.info(f"Saved prediction plot to {prediction_path}")
+
+        for eval_name, _, eval_loader in eval_items:
+            metrics_summary = get_reconstruction_metric_summary(
+                model,
+                eval_loader,
+                device,
+                fs=fs,
+                low_freq_hz=low_freq_hz,
+                eps=args.dataset.eps,
+                metric_protocol=args.get("evaluation", {}).get("metric_protocol", "default"),
+            )
+            logger.info('\n')
+            logger.info(separator)
+            logger.info(f"{ckpt_name} | {eval_name}")
+            logger.info(f"{'Metric':>24} | {'Mean':>12} | {'Std':>12} | {'Count':>8}")
+            logger.info(separator)
+            for key, stats in metrics_summary.items():
+                display_name = metric_display_map.get(key, key)
+                logger.info(
+                    f"{display_name:>24} | {stats['mean']:>12.4f} | "
+                    f"{stats['std']:>12.4f} | {stats['count']:>8}"
+                )
+            logger.info(separator + "\n")
+            with open(eval_dir / f"metrics_{eval_name}.yaml", "w", encoding="utf-8") as f:
+                yaml.safe_dump(metrics_summary, f, sort_keys=False)
+
+        complexity_path = eval_dir / "complexity_summary.yaml"
+        complexity = profile_model_complexity(
+            model,
+            device,
+            input_length=int(args.dataset.get("window_size", 512)),
+            batch_size=1,
+        )
+        logger.info('\n')
+        logger.info(separator)
+        logger.info(f"{ckpt_name} | complexity")
+        logger.info(f"{'Metric':>24} | {'Value':>12}")
+        logger.info(separator)
+        for key, value in complexity.items():
+            display_name = metric_display_map.get(key, key)
+            logger.info(f"{display_name:>24} | {value:>12.4f}")
+        logger.info(separator + "\n")
+        with open(complexity_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(complexity, f, sort_keys=False)
+
+
+9. 核心模型原始碼: mecg_e.py 基礎元件
+----------------------------------------------------------------------------------------------------
+# mecg_e.py:184-191 class LearnableSigmoid2d
+class LearnableSigmoid2d(nn.Module):
+    def __init__(self, in_features, beta=1):
+        super().__init__()
+        self.beta = beta
+        self.slope = nn.Parameter(torch.ones(in_features, 1))
+
+    def forward(self, x):
+        return self.beta * torch.sigmoid(self.slope * x)
+
+# mecg_e.py:271-296 class DenseBlock
+class DenseBlock(nn.Module):
+    def __init__(self, h, kernel_size=(3, 3), depth=4):
+        super().__init__()
+        self.dense_block = nn.ModuleList()
+        for i in range(depth):
+            dil = 2**i
+            self.dense_block.append(
+                nn.Sequential(
+                    nn.Conv2d(
+                        h.dense_channel * (i + 1),
+                        h.dense_channel,
+                        kernel_size,
+                        dilation=(dil, 1),
+                        padding=get_padding_2d(kernel_size, (dil, 1)),
+                    ),
+                    nn.InstanceNorm2d(h.dense_channel, affine=True),
+                    nn.PReLU(h.dense_channel),
+                )
+            )
+
+    def forward(self, x):
+        skip = x
+        for dense_conv in self.dense_block:
+            x = dense_conv(skip)
+            skip = torch.cat([x, skip], dim=1)
+        return x
+
+# mecg_e.py:299-317 class DenseEncoder
+class DenseEncoder(nn.Module):
+    def __init__(self, h, in_channel):
+        super().__init__()
+        self.dense_conv_1 = nn.Sequential(
+            nn.Conv2d(in_channel, h.dense_channel, (1, 1)),
+            nn.InstanceNorm2d(h.dense_channel, affine=True),
+            nn.PReLU(h.dense_channel),
+        )
+        self.dense_block = DenseBlock(h, depth=h.get("edepth", 4))
+        self.dense_conv_2 = nn.Sequential(
+            nn.Conv2d(h.dense_channel, h.dense_channel, (1, 3), (1, 2)),
+            nn.InstanceNorm2d(h.dense_channel, affine=True),
+            nn.PReLU(h.dense_channel),
+        )
+
+    def forward(self, x):
+        x = self.dense_conv_1(x)
+        x = self.dense_block(x)
+        return self.dense_conv_2(x)
+
+# mecg_e.py:320-337 class MaskDecoder
+class MaskDecoder(nn.Module):
+    def __init__(self, h, out_channel=1):
+        super().__init__()
+        self.dense_block = DenseBlock(h, depth=h.get("mdepth", 4))
+        self.mask_conv = nn.Sequential(
+            nn.ConvTranspose2d(h.dense_channel, h.dense_channel, (1, 3), (1, 2)),
+            nn.Conv2d(h.dense_channel, out_channel, (1, 1)),
+            nn.InstanceNorm2d(out_channel, affine=True),
+            nn.PReLU(out_channel),
+            nn.Conv2d(out_channel, out_channel, (1, 1)),
+        )
+        self.lsigmoid = LearnableSigmoid2d(h.n_fft // 2 + 1, beta=h.beta)
+
+    def forward(self, x):
+        x = self.dense_block(x)
+        x = self.mask_conv(x)
+        x = x.permute(0, 3, 2, 1).squeeze(-1)
+        return self.lsigmoid(x).permute(0, 2, 1).unsqueeze(1)
+
+# mecg_e.py:340-355 class PhaseDecoder
+class PhaseDecoder(nn.Module):
+    def __init__(self, h, out_channel=1):
+        super().__init__()
+        self.dense_block = DenseBlock(h, depth=h.get("pdepth", 4))
+        self.phase_conv = nn.Sequential(
+            nn.ConvTranspose2d(h.dense_channel, h.dense_channel, (1, 3), (1, 2)),
+            nn.InstanceNorm2d(h.dense_channel, affine=True),
+            nn.PReLU(h.dense_channel),
+        )
+        self.phase_conv_r = nn.Conv2d(h.dense_channel, out_channel, (1, 1))
+        self.phase_conv_i = nn.Conv2d(h.dense_channel, out_channel, (1, 1))
+
+    def forward(self, x):
+        x = self.dense_block(x)
+        x = self.phase_conv(x)
+        return torch.atan2(self.phase_conv_i(x), self.phase_conv_r(x))
+
+# mecg_e.py:358-373 class ComplexDecoder
+class ComplexDecoder(nn.Module):
+    def __init__(self, h, out_channel=1):
+        super().__init__()
+        self.dense_block = DenseBlock(h, depth=h.get("pdepth", 4))
+        self.phase_conv = nn.Sequential(
+            nn.ConvTranspose2d(h.dense_channel, h.dense_channel, (1, 3), (1, 2)),
+            nn.InstanceNorm2d(h.dense_channel, affine=True),
+            nn.PReLU(h.dense_channel),
+        )
+        self.phase_conv_r = nn.Conv2d(h.dense_channel, out_channel, (1, 1))
+        self.phase_conv_i = nn.Conv2d(h.dense_channel, out_channel, (1, 1))
+
+    def forward(self, x):
+        x = self.dense_block(x)
+        x = self.phase_conv(x)
+        return torch.cat((self.phase_conv_r(x), self.phase_conv_i(x)), dim=1)
+
+# mecg_e.py:417-1139 class MECGECore
+class MECGECore(nn.Module):
+    def __init__(self, config, block_cls=TSMambaBlock):
+        super().__init__()
+        h = AttrDict(config["model"])
+        self.h = h
+        self.fea = h.get("fea", "pha")
+        self.norm = h.get("norm", False)
+        self.loss_fn = h.get("loss_fn", "time+com+con").split("+")
+        self.num_tscblocks = h.num_tscblocks
+        self.pcscfm_enabled = h.get("pcscfm_enabled", False)
+        self.t_max = h.get("t_max", 1)
+        self.stop_threshold = h.get("stop_threshold", 0.95)
+        self.reject_threshold = h.get("reject_threshold", 0.98)
+        self.classical_kernel_size = h.get("classical_kernel_size", 129)
+        self.baseline_kernel_size = h.get("baseline_kernel_size", 129)
+        self.flow_nfe = h.get("flow_nfe", 4)
+        self.flow_samples = h.get("flow_samples", 4)
+        self.lambda_bc = h.get("lambda_bc", 0.02)
+        self.lambda_policy_value = h.get("lambda_policy_value", 0.01)
+        self.lambda_step = h.get("lambda_step", 0.001)
+        self.lambda_reject = h.get("lambda_reject", 0.01)
+        self.reject_uncertainty_threshold = h.get("reject_uncertainty_threshold", 0.25)
+        self.reject_disagreement_threshold = h.get("reject_disagreement_threshold", 0.25)
+        self.stochastic_policy = h.get("stochastic_policy", False)
+        self.policy_mode = h.get("policy_mode", "learned")
+        self.use_flow_proposal = h.get("use_flow_proposal", True)
+        self.phase_representation = h.get("phase_representation", "raw")
+        self.time_frequency_transform = h.get("time_frequency_transform", "stft")
+        if self.time_frequency_transform not in {"stft", "stfrft"}:
+            raise ValueError("time_frequency_transform must be either 'stft' or 'stfrft'.")
+        self.learnable_frft_order = h.get("learnable_frft_order", self.time_frequency_transform == "stfrft")
+        self.frft_order_min = h.get("frft_order_min", 0.05)
+        self.frft_order_max = h.get("frft_order_max", 1.95)
+        frft_order_init = h.get("frft_order_init", h.get("frft_order", 0.9))
+        if self.time_frequency_transform == "stfrft" and not self.frft_order_min < frft_order_init < self.frft_order_max:
+            raise ValueError("frft_order_init must be between frft_order_min and frft_order_max.")
+        if self.time_frequency_transform == "stfrft" and self.learnable_frft_order:
+            raw_init = _bounded_logit(frft_order_init, self.frft_order_min, self.frft_order_max)
+            self.frft_order_raw = nn.Parameter(torch.tensor(raw_init, dtype=torch.float32))
+        elif self.time_frequency_transform == "stfrft":
+            self.register_buffer("frft_order_fixed", torch.tensor(float(frft_order_init), dtype=torch.float32))
+        self.last_metadata = None
+
+        in_channel = 3 if self.phase_representation == "sincos" and self.fea == "pha" else 2
+        self.dense_encoder = DenseEncoder(h, in_channel=in_channel)
+        if getattr(block_cls, "accepts_block_index", False):
+            self.tsc_blocks = nn.ModuleList([block_cls(h, block_index=i) for i in range(h.num_tscblocks)])
+        else:
+            self.tsc_blocks = nn.ModuleList([block_cls(h) for _ in range(h.num_tscblocks)])
+        self.mask_decoder = MaskDecoder(h, out_channel=1)
+
+        if self.fea == "cpx":
+            self.complex_decoder = ComplexDecoder(h, out_channel=1)
+        elif self.fea == "wav":
+            self.encoder = nn.Conv1d(
+                1, (h.n_fft // 2 + 1) * 2, h.win_size, h.hop_size, padding=h.win_size // 2
+            )
+            self.decoder = nn.ConvTranspose1d(
+                (h.n_fft // 2 + 1) * 2,
+                1,
+                h.win_size,
+                h.hop_size,
+                padding=h.win_size // 2,
+                output_padding=0,
+            )
+            self.complex_decoder = ComplexDecoder(h, out_channel=1)
+        elif self.fea == "pha":
+            self.phase_decoder = PhaseDecoder(h, out_channel=1)
+        else:
+            raise NotImplementedError(f"Feature '{self.fea}' is not implemented.")
+
+        if self.pcscfm_enabled:
+            if not self.use_flow_proposal and "flow" in self.loss_fn:
+                raise ValueError("model.use_flow_proposal=False requires removing 'flow' from model.loss_fn.")
+            self.proposal_count = 3 if self.use_flow_proposal else 2
+            h["proposal_count"] = self.proposal_count
+            if self.use_flow_proposal:
+                self.flow_head = FlowBaselineHead(h)
+            state_dim = h.dense_channel + (15 if self.use_flow_proposal else 12)
+            self.policy_head = RiskPolicyHead(h, state_dim=state_dim)
+            self.safety_layer = MorphologySafetyLayer(h)
+
+    def _current_frft_order(self):
+        if self.time_frequency_transform != "stfrft":
+            return None
+        if self.learnable_frft_order:
+            span = self.frft_order_max - self.frft_order_min
+            return self.frft_order_min + span * torch.sigmoid(self.frft_order_raw)
+        return self.frft_order_fixed
+
+    def _mag_pha_transform(self, audio):
+        if self.time_frequency_transform == "stfrft":
+            return mag_pha_stfrft(
+                audio,
+                self.h.n_fft,
+                self.h.hop_size,
+                self.h.win_size,
+                self.h.compress_factor,
+                frft_order=self._current_frft_order(),
+            )
+        return mag_pha_stft(
+            audio,
+            self.h.n_fft,
+            self.h.hop_size,
+            self.h.win_size,
+            self.h.compress_factor,
+        )
+
+    def _mag_pha_transform_loss(self, audio):
+        if self.time_frequency_transform == "stfrft":
+            return mag_pha_stfrft_loss(
+                audio,
+                self.h.n_fft,
+                self.h.hop_size,
+                self.h.win_size,
+                self.h.compress_factor,
+                frft_order=self._current_frft_order(),
+            )
+        return mag_pha_stft_loss(
+            audio,
+            self.h.n_fft,
+            self.h.hop_size,
+            self.h.win_size,
+            self.h.compress_factor,
+        )
+
+    def _mag_pha_inverse(self, mag, pha):
+        if self.time_frequency_transform == "stfrft":
+            return mag_pha_istfrft(
+                mag,
+                pha,
+                self.h.n_fft,
+                self.h.hop_size,
+                self.h.win_size,
+                self.h.compress_factor,
+                frft_order=self._current_frft_order(),
+            )
+        return mag_pha_istft(
+            mag,
+            pha,
+            self.h.n_fft,
+            self.h.hop_size,
+            self.h.win_size,
+            self.h.compress_factor,
+        )
+
+    def _norm_factor(self, noisy):
+        if self.norm == "1":
+            return torch.sqrt(noisy.shape[-1] / torch.sum(noisy**2.0, -1, keepdim=True))
+        if self.norm == "2":
+            return 1 / noisy.abs().max(-1, keepdim=True)[0]
+        return torch.ones((noisy.shape[0], 1, 1), device=noisy.device)
+
+    def _encode_noisy(self, noisy_audio):
+        noisy_mag, noisy_pha, noisy_com = self._mag_pha_transform(noisy_audio)
+        noisy_mag_4d = noisy_mag.unsqueeze(-1).permute(0, 3, 2, 1)
+
+        if self.fea == "cpx":
+            x = noisy_com.permute(0, 3, 2, 1)
+        elif self.fea == "pha":
+            if self.phase_representation == "sincos":
+                noisy_sin = torch.sin(noisy_pha).unsqueeze(-1).permute(0, 3, 2, 1)
+                noisy_cos = torch.cos(noisy_pha).unsqueeze(-1).permute(0, 3, 2, 1)
+                x = torch.cat((noisy_mag_4d, noisy_sin, noisy_cos), dim=1)
+            else:
+                noisy_pha_4d = noisy_pha.unsqueeze(-1).permute(0, 3, 2, 1)
+                x = torch.cat((noisy_mag_4d, noisy_pha_4d), dim=1)
+        elif self.fea == "wav":
+            x = self.encoder(noisy_audio.unsqueeze(1))
+            b, channels, frames = x.shape
+            x = x.view(b, 2, -1, frames).permute(0, 1, 3, 2)
+        else:
+            raise NotImplementedError(f"Feature '{self.fea}' is not implemented.")
+
+        x = self.dense_encoder(x)
+        for block in self.tsc_blocks:
+            x = block(x)
+        return x, noisy_mag_4d, noisy_pha
+
+    def _smooth_1d(self, x, kernel_size):
+        if kernel_size <= 1:
+            return x
+        kernel_size = min(kernel_size, x.shape[-1] if x.shape[-1] % 2 == 1 else x.shape[-1] - 1)
+        kernel_size = max(kernel_size, 1)
+        padding = kernel_size // 2
+        return F.avg_pool1d(x, kernel_size=kernel_size, stride=1, padding=padding, count_include_pad=False)
+
+    def _baseline_projection(self, x):
+        return self._smooth_1d(x, self.baseline_kernel_size)
+
+    def _classical_baseline(self, x):
+        return self._smooth_1d(x, self.classical_kernel_size)
+
+    def _validity_features(self, x, valid_mask=None):
+        finite = torch.isfinite(x).float()
+        if valid_mask is not None:
+            finite = finite * valid_mask.float()
+        x_safe = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0) * finite
+        peak = x_safe.abs().amax(dim=-1, keepdim=True).clamp_min(1e-6)
+        clipping_mask = (x_safe.abs() > 0.98 * peak).float()
+        return {
+            "valid_mask": finite,
+            "clipping_ratio": clipping_mask.mean(dim=-1),
+            "missing_ratio": (1.0 - finite).mean(dim=-1),
+            "x_safe": x_safe,
+        }
+
+    def _baseline_coefficients(self, baseline):
+        coeff_count = self.h.get("flow_coeff_count", 32)
+        if self.h.get("flow_basis", "cosine") != "cosine":
+            return F.interpolate(baseline, size=coeff_count, mode="linear", align_corners=False).squeeze(1)
+        signal_len = baseline.shape[-1]
+        t = torch.linspace(0.0, 1.0, signal_len, device=baseline.device, dtype=baseline.dtype)
+        basis = torch.stack([torch.cos(torch.pi * k * t) for k in range(coeff_count)], dim=0)
+        denom = basis.pow(2).sum(dim=-1).clamp_min(1e-6)
+        return torch.matmul(baseline.squeeze(1), basis.t()) / denom
+
+    def restore_one_shot(self, noisy_audio, return_com=False):
+        if noisy_audio.ndim == 3:
+            noisy_audio = noisy_audio.squeeze(1)
+        x, noisy_mag_4d, noisy_pha = self._encode_noisy(noisy_audio)
+        mag_g = (noisy_mag_4d * self.mask_decoder(x)).permute(0, 3, 2, 1).squeeze(-1)
+
+        if self.fea == "cpx":
+            com_d = self.complex_decoder(x).permute(0, 3, 2, 1)
+            com_g = torch.stack(
+                (mag_g * torch.cos(noisy_pha), mag_g * torch.sin(noisy_pha)), dim=-1
+            )
+            pha_g = torch.angle(torch.complex((com_g + com_d)[..., 0], (com_g + com_d)[..., 1]))
+            restored = self._mag_pha_inverse(mag_g, pha_g)
+        elif self.fea == "pha":
+            pha_g = self.phase_decoder(x).permute(0, 3, 2, 1).squeeze(-1)
+            com_g = torch.stack(
+                (mag_g * torch.cos(pha_g), mag_g * torch.sin(pha_g)), dim=-1
+            )
+            restored = self._mag_pha_inverse(mag_g, pha_g)
+        else:
+            b, channels, frames = self.encoder(noisy_audio.unsqueeze(1)).shape
+            com_d = self.complex_decoder(x).permute(0, 1, 3, 2).reshape(b, channels, frames)
+            restored = self.decoder(com_d).squeeze(1)
+            _, _, com_g = self._mag_pha_transform_loss(restored)
+        output = restored.unsqueeze(1)
+        if return_com:
+            return output, com_g
+        return output
+
+    def restore(self, noisy_audio):
+        restored, _ = self.restore_with_metadata(noisy_audio)
+        return restored
+
+    def restore_with_metadata(self, noisy_audio, valid_mask=None):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        if noisy_audio.shape[1] != 1:
+            raise ValueError(f"MECG-E expects single-lead input shaped [B, 1, T], got {noisy_audio.shape}.")
+
+        norm_factor = self._norm_factor(noisy_audio)
+        noisy_audio_norm = (noisy_audio * norm_factor).squeeze(1)
+        if self.pcscfm_enabled:
+            if valid_mask is not None:
+                valid_mask = valid_mask.to(noisy_audio.device)
+            restored, _, _, metadata = self._pcscfm_restoration(
+                noisy_audio_norm.unsqueeze(1),
+                valid_mask=valid_mask,
+                training=False,
+                return_metadata=True,
+            )
+            self.last_metadata = metadata
+            return restored.unsqueeze(1) / norm_factor, metadata
+
+        restored = self.restore_one_shot(noisy_audio_norm)
+        self.last_metadata = None
+        return restored / norm_factor, None
+
+    def _belief_state(
+        self,
+        pooled_feature,
+        current,
+        original,
+        direct_baseline,
+        flow_mu,
+        flow_logvar,
+        classical_baseline,
+        validity,
+        step_idx,
+    ):
+        cumulative = original - current
+        if self.use_flow_proposal:
+            flow_var = flow_logvar.exp()
+            proposal_disagreement = torch.stack(
+                [
+                    (direct_baseline - flow_mu).abs().mean(dim=-1),
+                    (direct_baseline - classical_baseline).abs().mean(dim=-1),
+                    (flow_mu - classical_baseline).abs().mean(dim=-1),
+                ],
+                dim=0,
+            ).mean(dim=0)
+            stats = torch.cat(
+                [
+                    direct_baseline.abs().mean(dim=-1),
+                    flow_mu.abs().mean(dim=-1),
+                    flow_var.mean(dim=-1),
+                    classical_baseline.abs().mean(dim=-1),
+                    self._baseline_projection(current).abs().mean(dim=-1),
+                    cumulative.abs().mean(dim=-1),
+                    current.std(dim=-1),
+                    current.amax(dim=-1) - current.amin(dim=-1),
+                    validity["clipping_ratio"],
+                    validity["missing_ratio"],
+                    proposal_disagreement,
+                    (direct_baseline * flow_mu).mean(dim=-1),
+                    current.abs().median(dim=-1).values,
+                    current.mean(dim=-1),
+                    torch.full_like(current.mean(dim=-1), float(step_idx) / max(self.t_max, 1)),
+                ],
+                dim=-1,
+            )
+        else:
+            proposal_disagreement = (direct_baseline - classical_baseline).abs().mean(dim=-1)
+            stats = torch.cat(
+                [
+                    direct_baseline.abs().mean(dim=-1),
+                    classical_baseline.abs().mean(dim=-1),
+                    self._baseline_projection(current).abs().mean(dim=-1),
+                    cumulative.abs().mean(dim=-1),
+                    current.std(dim=-1),
+                    current.amax(dim=-1) - current.amin(dim=-1),
+                    validity["clipping_ratio"],
+                    validity["missing_ratio"],
+                    proposal_disagreement,
+                    current.abs().median(dim=-1).values,
+                    current.mean(dim=-1),
+                    torch.full_like(current.mean(dim=-1), float(step_idx) / max(self.t_max, 1)),
+                ],
+                dim=-1,
+            )
+        return torch.cat([pooled_feature, stats], dim=-1)
+
+    def _oracle_action(self, current, clean_audio, direct_baseline, flow_mu, classical_baseline):
+        residual = current - clean_audio.unsqueeze(1)
+        proposals = (
+            torch.cat([direct_baseline, flow_mu, classical_baseline], dim=1)
+            if self.use_flow_proposal
+            else torch.cat([direct_baseline, classical_baseline], dim=1)
+        )
+        scores = (proposals * residual).mean(dim=-1)
+        best = scores.argmax(dim=1)
+        weights = F.one_hot(best, num_classes=self.proposal_count).float().unsqueeze(-1)
+        chosen = (proposals * weights).sum(dim=1, keepdim=True)
+        numerator = (residual * chosen).sum(dim=-1, keepdim=True)
+        denominator = (chosen**2).sum(dim=-1, keepdim=True).clamp_min(1e-6)
+        alpha = (numerator / denominator).clamp(0.0, 1.0)
+        current_loss = (current.squeeze(1) - clean_audio).abs().mean(dim=-1, keepdim=True)
+        stop = (current_loss < self.h.get("oracle_stop_l1", 0.02)).float().unsqueeze(-1)
+        reject = (scores.max(dim=1, keepdim=True).values < 0).float().unsqueeze(-1)
+        return alpha, weights, stop, reject
+
+    def _pcscfm_restoration(self, noisy_audio, clean_audio=None, valid_mask=None, training=False, return_metadata=False):
+        validity = self._validity_features(noisy_audio, valid_mask=valid_mask)
+        current = validity["x_safe"]
+        original = current
+        cumulative_cost = torch.zeros((noisy_audio.shape[0], 1, 1), device=noisy_audio.device)
+        history = []
+        last_com = None
+
+        for step_idx in range(self.t_max):
+            direct_clean = self.restore_one_shot(current)
+            direct_baseline = current - direct_clean
+            encoded, _, _ = self._encode_noisy(current.squeeze(1))
+            _, _, last_com = self._mag_pha_transform_loss(direct_clean.squeeze(1))
+            pooled_feature = encoded.mean(dim=(2, 3))
+            flow_mu = None
+            flow_logvar = None
+            flow_mu_coeff = None
+            if self.use_flow_proposal:
+                flow_mu, flow_logvar, pooled_feature, flow_mu_coeff = self.flow_head(
+                    encoded,
+                    current.shape[-1],
+                    nfe=self.flow_nfe,
+                    samples=self.flow_samples,
+                )
+            classical_baseline = self._classical_baseline(current)
+            state = self._belief_state(
+                pooled_feature,
+                current,
+                original,
+                direct_baseline,
+                flow_mu,
+                flow_logvar,
+                classical_baseline,
+                validity,
+                step_idx,
+            )
+            if self.policy_mode == "fixed_multistep":
+                batch = state.shape[0]
+                weights = torch.zeros((batch, self.proposal_count, 1), device=state.device, dtype=state.dtype)
+                weights[:, 0:1] = 1.0
+                action = {
+                    "alpha": torch.full((batch, 1, 1), 1.0 / max(self.t_max, 1), device=state.device, dtype=state.dtype),
+                    "weights": weights,
+                    "stop_logit": torch.full((batch, 1, 1), -1.0e9, device=state.device, dtype=state.dtype),
+                    "reject_logit": torch.full((batch, 1, 1), -1.0e9, device=state.device, dtype=state.dtype),
+                    "stop_prob": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                    "reject_prob": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                    "value": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                    "cost_value": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                    "weight_index": torch.zeros((batch, 1), device=state.device, dtype=torch.long),
+                    "stop_sample": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                    "reject_sample": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                    "log_prob": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                    "entropy": torch.zeros((batch, 1, 1), device=state.device, dtype=state.dtype),
+                }
+            else:
+                action = self.policy_head.sample_action(
+                    state,
+                    deterministic=(not training or not self.stochastic_policy),
+                )
+            weights = action["weights"]
+            if self.use_flow_proposal:
+                mixed_baseline = (
+                    weights[:, 0:1] * direct_baseline
+                    + weights[:, 1:2] * flow_mu
+                    + weights[:, 2:3] * classical_baseline
+                )
+            else:
+                mixed_baseline = weights[:, 0:1] * direct_baseline + weights[:, 1:2] * classical_baseline
+            delta = self._baseline_projection(mixed_baseline)
+            alpha_safe, cumulative_cost, morph_cost = self.safety_layer(action["alpha"], delta, cumulative_cost)
+            next_current = current - alpha_safe * delta
+
+            item = {
+                "direct_clean": direct_clean,
+                "direct_baseline": direct_baseline,
+                "classical_baseline": classical_baseline,
+                "alpha": action["alpha"],
+                "alpha_safe": alpha_safe,
+                "weights": weights,
+                "stop_logit": action["stop_logit"],
+                "reject_logit": action["reject_logit"],
+                "stop_prob": action["stop_prob"],
+                "reject_prob": action["reject_prob"],
+                "weight_index": action.get("weight_index", action["weights"].squeeze(-1).argmax(dim=-1, keepdim=True)),
+                "stop_sample": action.get("stop_sample", (action["stop_prob"] >= 0.5).float()),
+                "reject_sample": action.get("reject_sample", (action["reject_prob"] >= 0.5).float()),
+                "log_prob": action.get("log_prob", torch.zeros_like(action["alpha"])),
+                "entropy": action.get("entropy", torch.zeros_like(action["alpha"])),
+                "value": action["value"],
+                "cost_value": action["cost_value"],
+                "morph_cost": morph_cost,
+                "state": state,
+            }
+            if self.use_flow_proposal:
+                item.update(
+                    {
+                        "flow_mu": flow_mu,
+                        "flow_logvar": flow_logvar,
+                        "flow_mu_coeff": flow_mu_coeff,
+                    }
+                )
+            if clean_audio is not None:
+                oracle_alpha, oracle_weights, oracle_stop, oracle_reject = self._oracle_action(
+                    current,
+                    clean_audio,
+                    direct_baseline,
+                    flow_mu,
+                    classical_baseline,
+                )
+                item.update(
+                    {
+                        "oracle_alpha": oracle_alpha,
+                        "oracle_weights": oracle_weights,
+                        "oracle_stop": oracle_stop,
+                        "oracle_reject": oracle_reject,
+                    }
+                )
+                if self.use_flow_proposal:
+                    item.update(
+                        {
+                            "flow_target_coeff": self._baseline_coefficients(
+                                self._baseline_projection(current - clean_audio.unsqueeze(1))
+                            ),
+                            "encoded": encoded,
+                        }
+                    )
+            history.append(item)
+
+            current = next_current
+            if not training:
+                should_stop = (action["stop_prob"] >= self.stop_threshold).view(-1, 1, 1)
+                if self.use_flow_proposal:
+                    flow_uncertainty = flow_logvar.exp().mean(dim=-1, keepdim=True)
+                    disagreement = torch.stack(
+                        [
+                            (direct_baseline - flow_mu).abs().mean(dim=-1, keepdim=True),
+                            (direct_baseline - classical_baseline).abs().mean(dim=-1, keepdim=True),
+                            (flow_mu - classical_baseline).abs().mean(dim=-1, keepdim=True),
+                        ],
+                        dim=0,
+                    ).mean(dim=0)
+                else:
+                    flow_uncertainty = torch.zeros_like(action["reject_prob"])
+                    disagreement = (direct_baseline - classical_baseline).abs().mean(dim=-1, keepdim=True)
+                should_reject = (
+                    (action["reject_prob"] >= self.reject_threshold)
+                    | (self.use_flow_proposal and flow_uncertainty >= self.reject_uncertainty_threshold)
+                    | (disagreement >= self.reject_disagreement_threshold)
+                    | (validity["clipping_ratio"].unsqueeze(-1) > 0.05)
+                    | (validity["missing_ratio"].unsqueeze(-1) > 0.0)
+                )
+                reject_reason = torch.zeros_like(should_reject, dtype=torch.long)
+                if self.use_flow_proposal:
+                    reject_reason = torch.where(
+                        flow_uncertainty >= self.reject_uncertainty_threshold,
+                        torch.full_like(reject_reason, 1),
+                        reject_reason,
+                    )
+                reject_reason = torch.where(
+                    disagreement >= self.reject_disagreement_threshold,
+                    torch.full_like(reject_reason, 2),
+                    reject_reason,
+                )
+                reject_reason = torch.where(
+                    validity["clipping_ratio"].unsqueeze(-1) > 0.05,
+                    torch.full_like(reject_reason, 3),
+                    reject_reason,
+                )
+                reject_reason = torch.where(
+                    validity["missing_ratio"].unsqueeze(-1) > 0.0,
+                    torch.full_like(reject_reason, 4),
+                    reject_reason,
+                )
+                reject_reason = torch.where(
+                    action["reject_prob"] >= self.reject_threshold,
+                    torch.full_like(reject_reason, 5),
+                    reject_reason,
+                )
+                history[-1]["hard_stop"] = should_stop.float()
+                history[-1]["hard_reject"] = should_reject.float()
+                history[-1]["reject_reason"] = reject_reason
+                if (should_stop | should_reject).all():
+                    break
+
+        metadata = self._build_metadata(history, validity)
+        if return_metadata:
+            return current.squeeze(1), last_com, history, metadata
+        return current.squeeze(1), last_com, history
+
+    def _build_metadata(self, history, validity):
+        if not history:
+            return {}
+        alpha = torch.cat([item["alpha"].detach().view(-1, 1) for item in history], dim=1)
+        alpha_safe = torch.cat([item["alpha_safe"].detach().view(-1, 1) for item in history], dim=1)
+        stop_prob = torch.cat([item["stop_prob"].detach().view(-1, 1) for item in history], dim=1)
+        reject_prob = torch.cat([item["reject_prob"].detach().view(-1, 1) for item in history], dim=1)
+        weights = torch.stack([item["weights"].detach().squeeze(-1) for item in history], dim=1)
+        if self.use_flow_proposal:
+            flow_uncertainty = torch.cat([item["flow_logvar"].detach().exp().mean(dim=-1) for item in history], dim=1)
+        else:
+            flow_uncertainty = torch.zeros_like(alpha)
+        hard_reject = history[-1].get(
+            "hard_reject", reject_prob[:, -1:].unsqueeze(-1) >= self.reject_threshold
+        ).detach().view(-1, 1)
+        hard_stop = history[-1].get(
+            "hard_stop", stop_prob[:, -1:].unsqueeze(-1) >= self.stop_threshold
+        ).detach().view(-1, 1)
+        reject_reason = history[-1].get(
+            "reject_reason", torch.zeros_like(hard_reject, dtype=torch.long)
+        ).detach().view(-1, 1)
+        return {
+            "steps": torch.full_like(hard_reject, len(history), dtype=torch.float32),
+            "alpha": alpha,
+            "alpha_safe": alpha_safe,
+            "proposal_weights": weights,
+            "stop_prob": stop_prob,
+            "reject_prob": reject_prob,
+            "hard_stop": hard_stop.float(),
+            "hard_reject": hard_reject.float(),
+            "coverage": 1.0 - hard_reject.float(),
+            "flow_uncertainty": flow_uncertainty,
+            "reject_reason": reject_reason,
+            "clipping_ratio": validity["clipping_ratio"].detach(),
+            "missing_ratio": validity["missing_ratio"].detach(),
+        }
+
+    def _masked_mean(self, value, valid_mask=None):
+        if valid_mask is None:
+            return value.mean()
+        mask = valid_mask.squeeze(1) if valid_mask.dim() == 3 else valid_mask
+        while mask.dim() < value.dim():
+            mask = mask.unsqueeze(-1)
+        mask = mask.to(value.device, dtype=value.dtype)
+        return (value * mask).sum() / mask.sum().clamp_min(1.0)
+
+    def _ecg_loss(self, clean_audio, restored_audio, norm_factor, predicted_com=None, aux_history=None, valid_mask=None):
+        _, _, clean_com = self._mag_pha_transform(clean_audio)
+        _, _, restored_com = self._mag_pha_transform_loss(restored_audio)
+        com_g = predicted_com if predicted_com is not None else restored_com
+        loss = clean_audio.new_tensor(0.0)
+
+        if "time" in self.loss_fn:
+            loss_time = F.l1_loss(clean_audio, restored_audio, reduction="none")
+            loss = loss + 0.5 * self._masked_mean(loss_time / norm_factor.squeeze(-1), valid_mask)
+        if "mse" in self.loss_fn:
+            loss_mse = F.mse_loss(clean_audio, restored_audio, reduction="none")
+            loss = loss + self._masked_mean(loss_mse / norm_factor.squeeze(-1).pow(2), valid_mask) * self.h.get("lambda_mse", 0.5)
+        if "cos" in self.loss_fn:
+            clean_c = clean_audio - clean_audio.mean(dim=-1, keepdim=True)
+            restored_c = restored_audio - restored_audio.mean(dim=-1, keepdim=True)
+            if valid_mask is not None:
+                mask = valid_mask.squeeze(1).to(clean_audio.device, dtype=clean_audio.dtype)
+                clean_c = clean_c * mask
+                restored_c = restored_c * mask
+            cos_sim = F.cosine_similarity(restored_c, clean_c, dim=-1, eps=1.0e-8)
+            loss = loss + (1.0 - cos_sim).mean() * self.h.get("lambda_cos", 0.1)
+        if "max" in self.loss_fn:
+            abs_error = (restored_audio - clean_audio).abs()
+            if valid_mask is not None:
+                mask = valid_mask.squeeze(1).to(abs_error.device, dtype=torch.bool)
+                abs_error = abs_error.masked_fill(~mask, 0.0)
+            topk = min(self.h.get("mad_topk", 8), abs_error.shape[-1])
+            max_loss = abs_error.topk(topk, dim=-1).values.mean(dim=-1)
+            loss = loss + max_loss.mean() * self.h.get("lambda_max", 0.05)
+        if "com" in self.loss_fn:
+            # Paper Eq.(9) Lcpx = E[||Yc - X̂c||^2]: Yc is the clean spectrum,
+            # X̂c is the network's directly predicted complex spectrum (com_g),
+            # NOT the spectrum re-computed from the ISTFT'd output audio
+            # (restored_com) -- that comparison is Lcon, computed just below.
+            # Matches official khhungg/MECG-E: F.mse_loss(clean_com, com_g).
+            loss_com = F.mse_loss(clean_com, com_g, reduction="none") * 2
+            loss = loss + 0.5 * (loss_com / norm_factor.unsqueeze(-1)).mean()
+        if "con" in self.loss_fn:
+            loss_con = F.mse_loss(com_g, restored_com, reduction="none") * 2
+            loss = loss + 0.5 * (loss_con / norm_factor.unsqueeze(-1)).mean()
+        if "lf" in self.loss_fn:
+            lf_residual = self._baseline_projection((restored_audio - clean_audio).unsqueeze(1)).squeeze(1)
+            loss = loss + self._masked_mean(lf_residual.abs(), valid_mask) * self.h.get("lambda_lf", 0.2)
+        if "morph" in self.loss_fn:
+            clean_derivative = clean_audio[..., 1:] - clean_audio[..., :-1]
+            restored_derivative = restored_audio[..., 1:] - restored_audio[..., :-1]
+            derivative_loss = F.l1_loss(restored_derivative, clean_derivative, reduction="none")
+            derivative_mask = valid_mask[..., 1:] * valid_mask[..., :-1] if valid_mask is not None else None
+            loss = loss + self._masked_mean(derivative_loss, derivative_mask) * self.h.get("lambda_morph", 0.1)
+
+        if aux_history and "flow" in self.loss_fn:
+            flow_loss = clean_audio.new_tensor(0.0)
+            for item in aux_history:
+                if "flow_target_coeff" in item and "encoded" in item:
+                    flow_loss = flow_loss + self.flow_head.flow_matching_loss(
+                        item["encoded"], item["flow_target_coeff"].detach()
+                    )
+                else:
+                    target = self._baseline_projection(item["direct_baseline"].detach())
+                    inv_var = torch.exp(-item["flow_logvar"])
+                    flow_loss = flow_loss + ((item["flow_mu"] - target) ** 2 * inv_var + item["flow_logvar"]).mean()
+            loss = loss + (flow_loss / len(aux_history)) * self.h.get("lambda_flow", 0.01)
+
+        if aux_history and "bc" in self.loss_fn:
+            bc_loss = clean_audio.new_tensor(0.0)
+            for item in aux_history:
+                if "oracle_alpha" not in item:
+                    continue
+                alpha_loss = F.mse_loss(item["alpha"], item["oracle_alpha"].detach())
+                weight_loss = F.mse_loss(item["weights"], item["oracle_weights"].detach())
+                stop_target = item["oracle_stop"].detach()
+                reject_target = item["oracle_reject"].detach()
+                if "stop_logit" in item and "reject_logit" in item:
+                    stop_loss = F.binary_cross_entropy_with_logits(item["stop_logit"], stop_target)
+                    reject_loss = F.binary_cross_entropy_with_logits(item["reject_logit"], reject_target)
+                else:
+                    stop_prob = item["stop_prob"].clamp(1e-6, 1.0 - 1e-6)
+                    reject_prob = item["reject_prob"].clamp(1e-6, 1.0 - 1e-6)
+                    stop_loss = F.binary_cross_entropy(stop_prob, stop_target)
+                    reject_loss = F.binary_cross_entropy(reject_prob, reject_target)
+                bc_loss = bc_loss + alpha_loss + weight_loss + 0.2 * stop_loss + 0.2 * reject_loss
+            loss = loss + (bc_loss / len(aux_history)) * self.lambda_bc
+
+        if aux_history and "value" in self.loss_fn:
+            final_abs = (restored_audio - clean_audio).abs()
+            if valid_mask is not None:
+                mask = valid_mask.squeeze(1).to(final_abs.device, dtype=final_abs.dtype)
+                final_l1 = (final_abs * mask).sum(dim=-1, keepdim=True) / mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+                final_l1 = final_l1.unsqueeze(-1).detach()
+            else:
+                final_l1 = final_abs.mean(dim=-1, keepdim=True).unsqueeze(-1).detach()
+            value_loss = clean_audio.new_tensor(0.0)
+            cost_loss = clean_audio.new_tensor(0.0)
+            for item in aux_history:
+                value_loss = value_loss + F.mse_loss(item["value"], -final_l1)
+                cost_loss = cost_loss + F.mse_loss(item["cost_value"], item["morph_cost"].detach())
+            loss = loss + ((value_loss + cost_loss) / len(aux_history)) * self.lambda_policy_value
+
+        if aux_history and "risk" in self.loss_fn:
+            reject_cost = torch.stack([item["reject_prob"].mean() for item in aux_history]).mean() * self.lambda_reject
+            loss = loss + len(aux_history) * self.lambda_step + reject_cost
+        return loss
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        if self.pcscfm_enabled:
+            audio_g, com_g, history = self._pcscfm_restoration(
+                noisy_audio,
+                clean_audio=clean_audio,
+                valid_mask=valid_mask,
+                training=True,
+            )
+            com_g = None
+        else:
+            audio_g, com_g = self.restore_one_shot(noisy_audio, return_com=True)
+            audio_g = audio_g.squeeze(1)
+            history = None
+        return self._ecg_loss(
+            clean_audio,
+            audio_g,
+            norm_factor,
+            predicted_com=com_g,
+            aux_history=history,
+            valid_mask=valid_mask,
+        )
+
+
+10. 核心模型原始碼: mambattention.py LSTM/DAPP/CFM/UNet
+----------------------------------------------------------------------------------------------------
+# mambattention.py:53-79 class ResidualDilatedConvModule
+class ResidualDilatedConvModule(nn.Module):
+    def __init__(self, dim, kernel_size=7, dilations=(1, 2, 4, 8), dropout=0.0):
+        super().__init__()
+        self.layernorm = nn.LayerNorm(dim)
+        self.blocks = nn.ModuleList()
+        for dilation in dilations:
+            dilation = int(dilation)
+            padding = (int(kernel_size) // 2) * dilation
+            self.blocks.append(
+                nn.Sequential(
+                    nn.Conv1d(dim, dim, kernel_size, padding=padding, dilation=dilation, groups=dim),
+                    nn.Conv1d(dim, dim * 2, 1),
+                    nn.GLU(dim=1),
+                    nn.Dropout(dropout),
+                    nn.Conv1d(dim, dim, 1),
+                )
+            )
+        self.out = nn.Conv1d(dim, dim, 1)
+        self.res_scale = nn.Parameter(torch.tensor(0.25))
+
+    def forward(self, x):
+        residual = x
+        x = self.layernorm(x).transpose(1, 2)
+        for block in self.blocks:
+            x = x + block(x)
+        x = self.out(x).transpose(1, 2)
+        return residual + torch.sigmoid(self.res_scale) * x
+
+# mambattention.py:82-149 class LightweightLSTMContextBlock
+class LightweightLSTMContextBlock(nn.Module):
+    accepts_block_index = True
+
+    def __init__(self, h, block_index=None):
+        super().__init__()
+        dim = int(h.dense_channel)
+        hidden = int(h.get("lstm_hidden", max(8, dim // 2)))
+        dropout = float(h.get("lstm_dropout", 0.05))
+        self.use_time_context = h.get("use_time_attention", True)
+        self.use_freq_context = h.get("use_freq_attention", True)
+        context_num_blocks = h.get("attention_num_blocks", None)
+        if context_num_blocks is not None and block_index is not None and block_index >= int(context_num_blocks):
+            self.use_time_context = False
+            self.use_freq_context = False
+        self.context_position = h.get("attention_position", "before_mamba")
+        if self.context_position not in {"before_mamba", "after_mamba"}:
+            raise ValueError("attention_position must be either 'before_mamba' or 'after_mamba'.")
+
+        self.context = ResidualDilatedConvModule(
+            dim=dim,
+            kernel_size=h.get("attention_conv_kernel_size", 7),
+            dilations=tuple(h.get("attention_conv_dilations", [1, 2, 4, 8])),
+            dropout=h.get("attention_conv_dropout", h.get("attention_dropout", 0.02)),
+        )
+        self.time_norm = nn.LayerNorm(dim)
+        self.freq_norm = nn.LayerNorm(dim)
+        self.time_lstm = nn.LSTM(
+            input_size=dim,
+            hidden_size=hidden,
+            num_layers=1,
+            dropout=0.0,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.freq_lstm = nn.LSTM(
+            input_size=dim,
+            hidden_size=hidden,
+            num_layers=1,
+            dropout=0.0,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.time_proj = nn.Linear(hidden * 2, dim)
+        self.freq_proj = nn.Linear(hidden * 2, dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def _run_lstm(self, x, norm, lstm, proj):
+        residual = x
+        x, _ = lstm(norm(x))
+        x = self.dropout(proj(x))
+        return residual + x
+
+    def forward(self, x):
+        b, c, t, f = x.size()
+        x = x.permute(0, 3, 2, 1).contiguous().view(b * f, t, c)
+        if self.use_time_context and self.context_position == "before_mamba":
+            x = self.context(x)
+        x = self._run_lstm(x, self.time_norm, self.time_lstm, self.time_proj)
+        if self.use_time_context and self.context_position == "after_mamba":
+            x = self.context(x)
+
+        x = x.view(b, f, t, c).permute(0, 2, 1, 3).contiguous().view(b * t, f, c)
+        if self.use_freq_context and self.context_position == "before_mamba":
+            x = self.context(x)
+        x = self._run_lstm(x, self.freq_norm, self.freq_lstm, self.freq_proj)
+        if self.use_freq_context and self.context_position == "after_mamba":
+            x = self.context(x)
+        return x.view(b, t, f, c).permute(0, 3, 1, 2)
+
+# mambattention.py:303-330 class LightweightDAPP2d
+class LightweightDAPP2d(nn.Module):
+    def __init__(self, channels, time_scales=(3, 5, 9, 15), freq_scales=(1, 3)):
+        super().__init__()
+        self.scales = tuple((int(t), int(f)) for t in time_scales for f in freq_scales)
+        self.projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.AdaptiveAvgPool2d(scale),
+                    nn.Conv2d(channels, channels, 1),
+                    nn.PReLU(channels),
+                )
+                for scale in self.scales
+            ]
+        )
+        self.fuse = nn.Sequential(
+            nn.Conv2d(channels * (len(self.scales) + 1), channels, 1),
+            nn.InstanceNorm2d(channels, affine=True),
+            nn.PReLU(channels),
+            nn.Conv2d(channels, channels, 3, padding=1),
+        )
+
+    def forward(self, x):
+        size = x.shape[-2:]
+        features = [x]
+        for projection in self.projections:
+            pooled = projection(x)
+            features.append(F.interpolate(pooled, size=size, mode="bilinear", align_corners=False))
+        return self.fuse(torch.cat(features, dim=1)) + x
+
+# mambattention.py:333-491 class DualPathDAPPMambAttentionCore
+class DualPathDAPPMambAttentionCore(MECGECore):
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        h = self.h
+        self.use_dapp = h.get("use_dapp", True)
+        if self.use_dapp:
+            self.feature_dapp = LightweightDAPP2d(
+                h.dense_channel,
+                time_scales=h.get("dapp_time_scales", [3, 5, 9, 15]),
+                freq_scales=h.get("dapp_freq_scales", [1, 3]),
+            )
+        else:
+            self.feature_dapp = nn.Identity()
+
+        head_hidden = h.get("dual_noise_head_hidden", h.dense_channel)
+        self.dual_noise_head = nn.Sequential(
+            nn.Conv2d(h.dense_channel, head_hidden, 3, padding=1),
+            nn.InstanceNorm2d(head_hidden, affine=True),
+            nn.PReLU(head_hidden),
+            nn.Conv2d(head_hidden, 2, 1),
+        )
+        # Start as the parent STFrFT model and let training learn a bounded residual correction.
+        nn.init.zeros_(self.dual_noise_head[-1].weight)
+        nn.init.zeros_(self.dual_noise_head[-1].bias)
+
+        self.residual_refine_scale = h.get("residual_refine_scale", 0.5)
+        self.teacher_weight_l1 = h.get("lambda_teacher_l1", 0.0)
+        self.teacher_weight_mse = h.get("lambda_teacher_mse", 0.0)
+        self.lambda_prd = h.get("lambda_prd", 0.4)
+        self.lambda_dual_baseline = h.get("lambda_dual_baseline", 0.2)
+        self.lambda_dual_residual = h.get("lambda_dual_residual", 0.1)
+
+    def _encode_noisy(self, noisy_audio):
+        encoded, noisy_mag_4d, noisy_pha = super()._encode_noisy(noisy_audio)
+        return self.feature_dapp(encoded), noisy_mag_4d, noisy_pha
+
+    def _predict_dual_noise(self, encoded, length):
+        predicted = self.dual_noise_head(encoded).mean(dim=-1)
+        predicted = F.interpolate(predicted, size=length, mode="linear", align_corners=False)
+        baseline_hat = predicted[:, 0:1, :]
+        residual_delta_hat = predicted[:, 1:2, :]
+        return baseline_hat, residual_delta_hat
+
+    def _restore_components(self, noisy_audio):
+        if noisy_audio.ndim == 3:
+            noisy_audio = noisy_audio.squeeze(1)
+        x, noisy_mag_4d, noisy_pha = self._encode_noisy(noisy_audio)
+        mag_g = (noisy_mag_4d * self.mask_decoder(x)).permute(0, 3, 2, 1).squeeze(-1)
+
+        if self.fea == "cpx":
+            com_d = self.complex_decoder(x).permute(0, 3, 2, 1)
+            com_g = torch.stack(
+                (mag_g * torch.cos(noisy_pha), mag_g * torch.sin(noisy_pha)), dim=-1
+            )
+            pha_g = torch.angle(torch.complex((com_g + com_d)[..., 0], (com_g + com_d)[..., 1]))
+            direct_restored = self._mag_pha_inverse(mag_g, pha_g)
+        elif self.fea == "pha":
+            pha_g = self.phase_decoder(x).permute(0, 3, 2, 1).squeeze(-1)
+            com_g = torch.stack(
+                (mag_g * torch.cos(pha_g), mag_g * torch.sin(pha_g)), dim=-1
+            )
+            direct_restored = self._mag_pha_inverse(mag_g, pha_g)
+        else:
+            b, channels, frames = self.encoder(noisy_audio.unsqueeze(1)).shape
+            com_d = self.complex_decoder(x).permute(0, 1, 3, 2).reshape(b, channels, frames)
+            direct_restored = self.decoder(com_d).squeeze(1)
+            _, _, com_g = self._mag_pha_transform_loss(direct_restored)
+
+        if direct_restored.shape[-1] != noisy_audio.shape[-1]:
+            direct_restored = F.interpolate(
+                direct_restored.unsqueeze(1),
+                size=noisy_audio.shape[-1],
+                mode="linear",
+                align_corners=False,
+            ).squeeze(1)
+        baseline_hat, residual_delta_hat = self._predict_dual_noise(x, noisy_audio.shape[-1])
+        restored = direct_restored.unsqueeze(1) + self.residual_refine_scale * residual_delta_hat
+        return restored, com_g, baseline_hat, residual_delta_hat, direct_restored.unsqueeze(1)
+
+    def restore_one_shot(self, noisy_audio, return_com=False):
+        restored, com_g, _, _, _ = self._restore_components(noisy_audio)
+        if return_com:
+            return restored, com_g
+        return restored
+
+    def restore_with_metadata(self, noisy_audio, valid_mask=None):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        if noisy_audio.shape[1] != 1:
+            raise ValueError(
+                f"MambAttention-STFrFT dual-path DAPP expects single-lead input shaped [B, 1, T], got {noisy_audio.shape}."
+            )
+        norm_factor = self._norm_factor(noisy_audio)
+        noisy_audio_norm = (noisy_audio * norm_factor).squeeze(1)
+        restored, _, baseline_hat, residual_delta_hat, _ = self._restore_components(noisy_audio_norm)
+        metadata = {
+            "baseline_hat_abs_mean": baseline_hat.detach().abs().mean(dim=-1),
+            "residual_delta_abs_mean": residual_delta_hat.detach().abs().mean(dim=-1),
+        }
+        self.last_metadata = metadata
+        return restored / norm_factor, metadata
+
+    def _prd_loss(self, clean_audio, restored_audio, valid_mask=None):
+        error = restored_audio - clean_audio
+        target = clean_audio
+        if valid_mask is not None:
+            mask = valid_mask.squeeze(1).to(error.device, dtype=error.dtype)
+            error = error * mask
+            target = target * mask
+        numerator = error.pow(2).sum(dim=-1)
+        denominator = target.pow(2).sum(dim=-1).clamp_min(1.0e-8)
+        return torch.sqrt(numerator / denominator).mean()
+
+    def _teacher_loss(self, restored_audio, teacher_audio, norm_factor, valid_mask=None):
+        if teacher_audio is None or self.teacher_weight_l1 + self.teacher_weight_mse <= 0:
+            return restored_audio.new_tensor(0.0)
+        if teacher_audio.ndim == 3:
+            teacher_audio = teacher_audio.squeeze(1)
+        teacher_audio = teacher_audio * norm_factor.squeeze(1)
+        loss = restored_audio.new_tensor(0.0)
+        if self.teacher_weight_l1:
+            l1 = F.l1_loss(restored_audio, teacher_audio, reduction="none")
+            loss = loss + self.teacher_weight_l1 * self._masked_mean(l1 / norm_factor.squeeze(-1), valid_mask)
+        if self.teacher_weight_mse:
+            mse = F.mse_loss(restored_audio, teacher_audio, reduction="none")
+            loss = loss + self.teacher_weight_mse * self._masked_mean(
+                mse / norm_factor.squeeze(-1).pow(2), valid_mask
+            )
+        return loss
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None, teacher_audio=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        restored_audio = restored.squeeze(1)
+        direct_restored = direct_restored.squeeze(1)
+        loss = self._ecg_loss(
+            clean_audio,
+            restored_audio,
+            norm_factor,
+            predicted_com=com_g,
+            valid_mask=valid_mask,
+        )
+        if "prd" in self.loss_fn:
+            loss = loss + self.lambda_prd * self._prd_loss(clean_audio, restored_audio, valid_mask)
+        if "dual" in self.loss_fn or "dual_noise" in self.loss_fn:
+            baseline_target = noisy_audio - clean_audio.unsqueeze(1)
+            residual_target = clean_audio.unsqueeze(1) - direct_restored.unsqueeze(1)
+            baseline_loss = F.mse_loss(baseline_hat, baseline_target, reduction="none")
+            residual_loss = F.mse_loss(residual_delta_hat, residual_target, reduction="none")
+            loss = loss + self.lambda_dual_baseline * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+            loss = loss + self.lambda_dual_residual * self._masked_mean(residual_loss.squeeze(1), valid_mask)
+        if "teacher" in self.loss_fn:
+            loss = loss + self._teacher_loss(restored_audio, teacher_audio, norm_factor, valid_mask)
+        return loss
+
+# mambattention.py:641-682 class UNetDAPP1d
+class UNetDAPP1d(nn.Module):
+    def __init__(self, channels, pool_scales=(3, 5, 9, 15), use_global_pool=True):
+        super().__init__()
+        self.pool_scales = tuple(int(scale) for scale in pool_scales)
+        self.use_global_pool = bool(use_global_pool)
+        self.projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.AdaptiveAvgPool1d(scale),
+                    nn.Conv1d(channels, channels, 1),
+                    nn.SiLU(),
+                )
+                for scale in self.pool_scales
+            ]
+        )
+        self.global_projection = (
+            nn.Sequential(
+                nn.AdaptiveAvgPool1d(1),
+                nn.Conv1d(channels, channels, 1),
+                nn.SiLU(),
+            )
+            if self.use_global_pool
+            else None
+        )
+        feature_count = 1 + len(self.pool_scales) + int(self.use_global_pool)
+        self.fuse = nn.Sequential(
+            nn.Conv1d(channels * feature_count, channels, 1),
+            nn.GroupNorm(1, channels),
+            nn.SiLU(),
+            nn.Conv1d(channels, channels, 3, padding=1),
+        )
+
+    def forward(self, x):
+        length = x.shape[-1]
+        features = [x]
+        for projection in self.projections:
+            pooled = projection(x)
+            features.append(F.interpolate(pooled, size=length, mode="linear", align_corners=False))
+        if self.global_projection is not None:
+            pooled = self.global_projection(x)
+            features.append(F.interpolate(pooled, size=length, mode="linear", align_corners=False))
+        return self.fuse(torch.cat(features, dim=1)) + x
+
+# mambattention.py:777-866 class ConditionalResidualFlowUNetRefiner1d
+class ConditionalResidualFlowUNetRefiner1d(nn.Module):
+    def __init__(
+        self,
+        condition_channels=6,
+        state_channels=2,
+        output_channels=2,
+        base_channels=64,
+        channel_mults=(1, 2, 4),
+        time_dim=192,
+        groups=8,
+        dropout=0.0,
+        pool_scales=(3, 5, 9, 15),
+        attention_heads=4,
+        use_attention=True,
+        mid_dilations=(1, 2, 4, 8),
+        aux_output_channels=0,
+    ):
+        super().__init__()
+        self.output_channels = int(output_channels)
+        self.aux_output_channels = int(aux_output_channels)
+        self.time_embedding = nn.Sequential(
+            ResidualFlowTimeEmbedding(time_dim),
+            nn.Linear(time_dim, time_dim),
+            nn.SiLU(),
+            nn.Linear(time_dim, time_dim),
+        )
+        channels = [int(base_channels) * int(mult) for mult in channel_mults]
+        self.input = nn.Conv1d(condition_channels + state_channels, channels[0], 3, padding=1)
+        self.downs = nn.ModuleList()
+        in_channels = channels[0]
+        for out_channels in channels:
+            self.downs.append(
+                UNetDownBlock1d(
+                    in_channels,
+                    out_channels,
+                    time_dim,
+                    groups=groups,
+                    dropout=dropout,
+                )
+            )
+            in_channels = out_channels
+        self.first_skip_dapp = UNetDAPP1d(channels[0], pool_scales=pool_scales, use_global_pool=True)
+        self.mid_block1 = UNetConvBlock1d(channels[-1], channels[-1], time_dim, groups=groups, dropout=dropout)
+        if use_attention:
+            self.mid_attention = UNetSelfAttention1d(channels[-1], heads=attention_heads)
+        else:
+            self.mid_attention = UNetDilatedConvMidBlock1d(
+                channels[-1],
+                groups=groups,
+                dropout=dropout,
+                dilations=mid_dilations,
+            )
+        self.mid_block2 = UNetConvBlock1d(channels[-1], channels[-1], time_dim, groups=groups, dropout=dropout)
+        self.ups = nn.ModuleList()
+        current = channels[-1]
+        for skip_channels in reversed(channels):
+            self.ups.append(
+                UNetUpBlock1d(
+                    current,
+                    skip_channels,
+                    skip_channels,
+                    time_dim,
+                    groups=groups,
+                    dropout=dropout,
+                )
+            )
+            current = skip_channels
+        self.output = nn.Sequential(
+            nn.GroupNorm(1, channels[0]),
+            nn.SiLU(),
+            nn.Conv1d(channels[0], self.output_channels + self.aux_output_channels, 3, padding=1),
+        )
+
+    def forward(self, residual_state, condition, t):
+        if t.ndim == 0:
+            t = t.expand(residual_state.shape[0])
+        time_emb = self.time_embedding(t)
+        x = self.input(torch.cat([residual_state, condition], dim=1))
+        skips = []
+        for index, down in enumerate(self.downs):
+            x, skip = down(x, time_emb)
+            if index == 0:
+                skip = self.first_skip_dapp(skip)
+            skips.append(skip)
+        x = self.mid_block1(x, time_emb)
+        x = self.mid_attention(x)
+        x = self.mid_block2(x, time_emb)
+        for up, skip in zip(self.ups, reversed(skips)):
+            x = up(x, skip, time_emb)
+        return self.output(x)
+
+# mambattention.py:869-1233 class ResidualFlowDualPathDAPPMambAttentionCore
+class ResidualFlowDualPathDAPPMambAttentionCore(DualPathDAPPMambAttentionCore):
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        h = self.h
+        self.cfm_inference_steps = int(h.get("cfm_inference_steps", 2))
+        self.cfm_inference_shots = max(int(h.get("cfm_inference_shots", 1)), 1)
+        self.cfm_inference_shot_aggregation = str(h.get("cfm_inference_shot_aggregation", "mean")).lower()
+        if self.cfm_inference_shot_aggregation not in {"mean", "median"}:
+            raise ValueError(
+                "model.cfm_inference_shot_aggregation must be one of: mean, median; "
+                f"got {self.cfm_inference_shot_aggregation!r}."
+            )
+        self.cfm_inference_shot_sampling = str(h.get("cfm_inference_shot_sampling", "independent")).lower()
+        if self.cfm_inference_shot_sampling not in {"independent", "antithetic"}:
+            raise ValueError(
+                "model.cfm_inference_shot_sampling must be one of: independent, antithetic; "
+                f"got {self.cfm_inference_shot_sampling!r}."
+            )
+        if self.cfm_inference_shot_sampling == "antithetic" and self.cfm_inference_shots % 2 != 0:
+            raise ValueError("Antithetic inference shot sampling requires an even model.cfm_inference_shots value.")
+        self.cfm_inference_start_noise_scale = float(h.get("cfm_inference_start_noise_scale", 0.0))
+        self.cfm_train_noise_scale = float(h.get("cfm_train_noise_scale", 0.05))
+        self.cfm_zero_start_prob = float(h.get("cfm_zero_start_prob", 0.5))
+        self.cfm_bridge_noise_scale = float(h.get("cfm_bridge_noise_scale", 0.02))
+        self.cfm_condition_channels = 6
+        self.cfm_use_adaptive_gate = bool(h.get("cfm_use_adaptive_gate", True))
+        self.cfm_clean_delta_budget = float(h.get("cfm_clean_delta_budget", 0.6))
+        self.cfm_baseline_delta_budget = float(h.get("cfm_baseline_delta_budget", 0.8))
+        self.cfm_project_baseline_delta = bool(h.get("cfm_project_baseline_delta", True))
+        self.cfm_clean_lowpass_keep = float(h.get("cfm_clean_lowpass_keep", 0.25))
+        self.cfm_refine_gate_max = float(h.get("cfm_refine_gate_max", 0.6))
+        self.cfm_baseline_gate_max = float(h.get("cfm_baseline_gate_max", 0.6))
+        self.cfm_consistency_blend_max = float(h.get("cfm_consistency_blend_max", 0.5))
+        self.lambda_cfm = float(h.get("lambda_cfm", 0.2))
+        self.lambda_cfm_baseline = float(h.get("lambda_cfm_baseline", self.lambda_cfm))
+        self.lambda_cfm_recon = float(h.get("lambda_cfm_recon", 0.25))
+        self.lambda_cfm_stft = float(h.get("lambda_cfm_stft", 0.05))
+        self.lambda_cfm_lf = float(h.get("lambda_cfm_lf", 0.03))
+        self.lambda_cfm_deriv = float(h.get("lambda_cfm_deriv", 0.03))
+        self.lambda_cfm_residual_smooth = float(h.get("lambda_cfm_residual_smooth", 0.005))
+        self.lambda_cfm_clean_baseline_consistency = float(h.get("lambda_cfm_clean_baseline_consistency", 0.05))
+        gate_init = float(h.get("cfm_refine_gate_init", 0.15))
+        gate_ratio = min(max(gate_init / max(self.cfm_refine_gate_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.cfm_refine_gate_raw = nn.Parameter(
+            torch.tensor(math.log(gate_ratio / (1.0 - gate_ratio)), dtype=torch.float32)
+        )
+        baseline_gate_init = float(h.get("cfm_baseline_gate_init", gate_init))
+        baseline_gate_ratio = min(max(baseline_gate_init / max(self.cfm_baseline_gate_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.cfm_baseline_gate_raw = nn.Parameter(
+            torch.tensor(math.log(baseline_gate_ratio / (1.0 - baseline_gate_ratio)), dtype=torch.float32)
+        )
+        blend_init = float(h.get("cfm_consistency_blend_init", 0.25))
+        blend_ratio = min(max(blend_init / max(self.cfm_consistency_blend_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.cfm_consistency_blend_raw = nn.Parameter(
+            torch.tensor(math.log(blend_ratio / (1.0 - blend_ratio)), dtype=torch.float32)
+        )
+        if self.cfm_use_adaptive_gate:
+            self.cfm_adaptive_gate = CFMAdaptiveGate(
+                condition_channels=self.cfm_condition_channels,
+                hidden=int(h.get("cfm_gate_hidden", 32)),
+                refine_gate_init=gate_init,
+                refine_gate_max=self.cfm_refine_gate_max,
+                baseline_gate_init=baseline_gate_init,
+                baseline_gate_max=self.cfm_baseline_gate_max,
+                blend_init=blend_init,
+                blend_max=self.cfm_consistency_blend_max,
+            )
+        else:
+            self.cfm_adaptive_gate = None
+        self.residual_flow = ConditionalResidualFlowRefiner1d(
+            condition_channels=self.cfm_condition_channels,
+            state_channels=2,
+            output_channels=2,
+            channels=int(h.get("cfm_channels", 48)),
+            blocks=int(h.get("cfm_blocks", 4)),
+            time_dim=int(h.get("cfm_time_dim", 96)),
+            groups=int(h.get("cfm_groups", 8)),
+            dropout=float(h.get("cfm_dropout", 0.0)),
+            dilations=tuple(h.get("cfm_dilations", [1, 2, 4, 8])),
+        )
+
+    def _cfm_refine_gate(self):
+        return self.cfm_refine_gate_max * torch.sigmoid(self.cfm_refine_gate_raw)
+
+    def _cfm_baseline_gate(self):
+        return self.cfm_baseline_gate_max * torch.sigmoid(self.cfm_baseline_gate_raw)
+
+    def _cfm_consistency_blend(self):
+        return self.cfm_consistency_blend_max * torch.sigmoid(self.cfm_consistency_blend_raw)
+
+    def _cfm_gates(self, condition):
+        if self.cfm_adaptive_gate is not None:
+            return self.cfm_adaptive_gate(condition)
+        batch = condition.shape[0]
+        clean_gate = self._cfm_refine_gate().view(1, 1, 1).expand(batch, 1, 1)
+        baseline_gate = self._cfm_baseline_gate().view(1, 1, 1).expand(batch, 1, 1)
+        blend = self._cfm_consistency_blend().view(1, 1, 1).expand(batch, 1, 1)
+        return clean_gate, baseline_gate, blend
+
+    def _limit_delta(self, delta, reference, budget_ratio):
+        if budget_ratio <= 0:
+            return delta
+        reference_budget = (
+            reference.abs().mean(dim=-1, keepdim=True)
+            + 0.25 * reference.std(dim=-1, keepdim=True)
+        ).clamp_min(1.0e-6)
+        delta_level = delta.abs().mean(dim=-1, keepdim=True).clamp_min(1.0e-6)
+        scale = (float(budget_ratio) * reference_budget / delta_level).clamp(max=1.0)
+        return delta * scale
+
+    def _flow_condition(self, noisy_audio, base_restored, baseline_hat=None):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        if base_restored.ndim == 2:
+            base_restored = base_restored.unsqueeze(1)
+        estimated_baseline = noisy_audio - base_restored
+        if baseline_hat is None:
+            baseline_hat = estimated_baseline
+        low_noisy = self._baseline_projection(noisy_audio)
+        high_base = base_restored - self._baseline_projection(base_restored)
+        return torch.cat([noisy_audio, base_restored, estimated_baseline, baseline_hat, low_noisy, high_base], dim=1)
+
+    def _sample_flow_start(self, target_residual):
+        start = self.cfm_train_noise_scale * torch.randn_like(target_residual)
+        if self.cfm_zero_start_prob > 0:
+            zero_mask = (
+                torch.rand((target_residual.shape[0], 1, 1), device=target_residual.device)
+                < self.cfm_zero_start_prob
+            )
+            start = torch.where(zero_mask, torch.zeros_like(start), start)
+        return start
+
+    def _flow_matching_loss(self, condition, target_residual, channel_weight=1.0, valid_mask=None):
+        start = self._sample_flow_start(target_residual)
+        t = torch.rand((target_residual.shape[0],), device=target_residual.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_residual)
+        residual_state = (1.0 - t_view) * start + t_view * target_residual + bridge_noise
+        target_velocity = target_residual - start
+        predicted_velocity = self.residual_flow(residual_state, condition, t)
+        loss = F.mse_loss(predicted_velocity, target_velocity, reduction="none")
+        weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
+        return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
+
+    def _initial_inference_residual(self, condition, start_noise=None):
+        residual = condition.new_zeros((condition.shape[0], 2, condition.shape[-1]))
+        if self.cfm_inference_start_noise_scale > 0:
+            if start_noise is None:
+                start_noise = torch.randn_like(residual)
+            residual = residual + self.cfm_inference_start_noise_scale * start_noise
+        return residual
+
+    def _integrate_residual_flow(self, condition, steps=None, start_noise=None):
+        steps = int(steps or self.cfm_inference_steps)
+        steps = max(steps, 1)
+        residual = self._initial_inference_residual(condition, start_noise=start_noise)
+        dt = 1.0 / steps
+        for step in range(steps):
+            t_value = (step + 0.5) / steps
+            t = torch.full((condition.shape[0],), t_value, device=condition.device, dtype=condition.dtype)
+            residual = residual + dt * self.residual_flow(residual, condition, t)
+        return residual
+
+    def _inference_start_noises(self, condition):
+        if self.cfm_inference_start_noise_scale <= 0:
+            return [None] * self.cfm_inference_shots
+        noise_shape = (condition.shape[0], 2, condition.shape[-1])
+        if self.cfm_inference_shot_sampling == "independent":
+            return [torch.randn(noise_shape, device=condition.device, dtype=condition.dtype) for _ in range(self.cfm_inference_shots)]
+        half_shots = self.cfm_inference_shots // 2
+        noises = [torch.randn(noise_shape, device=condition.device, dtype=condition.dtype) for _ in range(half_shots)]
+        paired_noises = []
+        for noise in noises:
+            paired_noises.extend([noise, -noise])
+        return paired_noises
+
+    def _aggregate_inference_shots(self, shots):
+        if self.cfm_inference_shot_aggregation == "mean":
+            return shots.mean(dim=0)
+        sorted_shots = shots.sort(dim=0).values
+        shot_count = sorted_shots.shape[0]
+        mid = shot_count // 2
+        if shot_count % 2 == 1:
+            return sorted_shots[mid]
+        return 0.5 * (sorted_shots[mid - 1] + sorted_shots[mid])
+
+    def _refine_from_base(self, noisy_audio, base_restored, baseline_hat=None):
+        condition = self._flow_condition(noisy_audio, base_restored, baseline_hat=baseline_hat)
+        if self.cfm_inference_shots > 1 and not self.training:
+            start_noises = self._inference_start_noises(condition)
+            flow_hat = torch.stack(
+                [self._integrate_residual_flow(condition, start_noise=start_noise) for start_noise in start_noises],
+                dim=0,
+            )
+            flow_hat = self._aggregate_inference_shots(flow_hat)
+        else:
+            flow_hat = self._integrate_residual_flow(condition)
+        clean_delta_hat = flow_hat[:, 0:1]
+        baseline_delta_hat = flow_hat[:, 1:2]
+        estimated_baseline = noisy_audio - base_restored
+        clean_low = self._baseline_projection(clean_delta_hat)
+        clean_delta_hat = clean_delta_hat - (1.0 - self.cfm_clean_lowpass_keep) * clean_low
+        if self.cfm_project_baseline_delta:
+            baseline_delta_hat = self._baseline_projection(baseline_delta_hat)
+        clean_delta_hat = self._limit_delta(clean_delta_hat, estimated_baseline, self.cfm_clean_delta_budget)
+        baseline_delta_hat = self._limit_delta(baseline_delta_hat, estimated_baseline, self.cfm_baseline_delta_budget)
+        clean_gate, baseline_gate, consistency_blend = self._cfm_gates(condition)
+        clean_path = base_restored + clean_gate * clean_delta_hat
+        baseline_path = noisy_audio - (estimated_baseline + baseline_gate * baseline_delta_hat)
+        refined = clean_path + consistency_blend * (baseline_path - clean_path)
+        return refined, flow_hat, condition, clean_path, baseline_path
+
+    def restore_one_shot(self, noisy_audio, return_com=False):
+        restored, com_g, baseline_hat, _, _ = self._restore_components(noisy_audio)
+        refined, _, _, _, _ = self._refine_from_base(noisy_audio, restored, baseline_hat=baseline_hat)
+        if return_com:
+            return refined, com_g
+        return refined
+
+    def restore_with_metadata(self, noisy_audio, valid_mask=None):
+        if noisy_audio.ndim == 2:
+            noisy_audio = noisy_audio.unsqueeze(1)
+        if noisy_audio.shape[1] != 1:
+            raise ValueError(
+                f"MambAttention-STFrFT dual-path DAPP CFM expects single-lead input shaped [B, 1, T], got {noisy_audio.shape}."
+            )
+        norm_factor = self._norm_factor(noisy_audio)
+        noisy_audio_norm = noisy_audio * norm_factor
+        base_restored, _, baseline_hat, residual_delta_hat, _ = self._restore_components(noisy_audio_norm)
+        refined, flow_hat, _, _, _ = self._refine_from_base(noisy_audio_norm, base_restored, baseline_hat=baseline_hat)
+        metadata = {
+            "baseline_hat_abs_mean": baseline_hat.detach().abs().mean(dim=-1),
+            "residual_delta_abs_mean": residual_delta_hat.detach().abs().mean(dim=-1),
+            "cfm_clean_delta_abs_mean": flow_hat[:, 0:1].detach().abs().mean(dim=-1),
+            "cfm_baseline_delta_abs_mean": flow_hat[:, 1:2].detach().abs().mean(dim=-1),
+        }
+        clean_gate, baseline_gate, consistency_blend = self._cfm_gates(
+            self._flow_condition(noisy_audio_norm, base_restored, baseline_hat=baseline_hat)
+        )
+        metadata["cfm_refine_gate"] = clean_gate.detach().mean(dim=0).view(1)
+        metadata["cfm_baseline_gate"] = baseline_gate.detach().mean(dim=0).view(1)
+        metadata["cfm_consistency_blend"] = consistency_blend.detach().mean(dim=0).view(1)
+        self.last_metadata = metadata
+        return refined / norm_factor, metadata
+
+    def _multi_resolution_stft_loss(self, clean_audio, restored_audio, valid_mask=None):
+        if self.lambda_cfm_stft <= 0:
+            return clean_audio.new_tensor(0.0)
+        loss = clean_audio.new_tensor(0.0)
+        configs = self.h.get("cfm_stft_configs", [[32, 4, 32], [64, 8, 64], [128, 16, 128]])
+        for n_fft, hop_size, win_size in configs:
+            n_fft = int(n_fft)
+            hop_size = int(hop_size)
+            win_size = int(win_size)
+            if clean_audio.shape[-1] < win_size:
+                continue
+            clean_spec = torch.stft(
+                clean_audio,
+                n_fft=n_fft,
+                hop_length=hop_size,
+                win_length=win_size,
+                window=torch.hann_window(win_size, device=clean_audio.device, dtype=clean_audio.dtype),
+                center=True,
+                pad_mode="reflect",
+                return_complex=True,
+            )
+            restored_spec = torch.stft(
+                restored_audio,
+                n_fft=n_fft,
+                hop_length=hop_size,
+                win_length=win_size,
+                window=torch.hann_window(win_size, device=restored_audio.device, dtype=restored_audio.dtype),
+                center=True,
+                pad_mode="reflect",
+                return_complex=True,
+            )
+            loss = loss + F.smooth_l1_loss(torch.abs(restored_spec), torch.abs(clean_spec))
+        return loss / max(len(configs), 1)
+
+    def _cfm_auxiliary_losses(self, clean_audio, noisy_audio, base_restored, refined, flow_hat, clean_path, baseline_path, valid_mask=None):
+        loss = clean_audio.new_tensor(0.0)
+        if self.lambda_cfm_recon > 0:
+            recon = F.smooth_l1_loss(refined.squeeze(1), clean_audio, reduction="none")
+            loss = loss + self.lambda_cfm_recon * self._masked_mean(recon, valid_mask)
+        if self.lambda_cfm_stft > 0:
+            loss = loss + self.lambda_cfm_stft * self._multi_resolution_stft_loss(clean_audio, refined.squeeze(1), valid_mask)
+        if self.lambda_cfm_lf > 0:
+            target_baseline = self._baseline_projection(noisy_audio - clean_audio.unsqueeze(1))
+            predicted_baseline = self._baseline_projection(noisy_audio - refined)
+            lf_loss = F.smooth_l1_loss(predicted_baseline, target_baseline, reduction="none")
+            loss = loss + self.lambda_cfm_lf * self._masked_mean(lf_loss.squeeze(1), valid_mask)
+        if self.lambda_cfm_deriv > 0:
+            clean_derivative = clean_audio[..., 1:] - clean_audio[..., :-1]
+            refined_derivative = refined.squeeze(1)[..., 1:] - refined.squeeze(1)[..., :-1]
+            deriv_loss = F.smooth_l1_loss(refined_derivative, clean_derivative, reduction="none")
+            derivative_mask = valid_mask[..., 1:] * valid_mask[..., :-1] if valid_mask is not None else None
+            loss = loss + self.lambda_cfm_deriv * self._masked_mean(deriv_loss, derivative_mask)
+        if self.lambda_cfm_residual_smooth > 0:
+            residual_curvature = flow_hat[..., 2:] - 2.0 * flow_hat[..., 1:-1] + flow_hat[..., :-2]
+            smooth_mask = valid_mask[..., 2:] * valid_mask[..., 1:-1] * valid_mask[..., :-2] if valid_mask is not None else None
+            loss = loss + self.lambda_cfm_residual_smooth * self._masked_mean(residual_curvature.abs().sum(dim=1), smooth_mask)
+        if self.lambda_cfm_clean_baseline_consistency > 0:
+            consistency = F.smooth_l1_loss(clean_path, baseline_path, reduction="none")
+            loss = loss + self.lambda_cfm_clean_baseline_consistency * self._masked_mean(consistency.squeeze(1), valid_mask)
+        return loss
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        base_restored = torch.nan_to_num(base_restored).clamp(-1.0e4, 1.0e4)
+        com_g = torch.nan_to_num(com_g).clamp(-1.0e4, 1.0e4)
+        baseline_hat = torch.nan_to_num(baseline_hat).clamp(-1.0e4, 1.0e4)
+        residual_delta_hat = torch.nan_to_num(residual_delta_hat).clamp(-1.0e4, 1.0e4)
+        direct_restored = torch.nan_to_num(direct_restored).clamp(-1.0e4, 1.0e4)
+        refined, flow_hat, condition, clean_path, baseline_path = self._refine_from_base(
+            noisy_audio,
+            base_restored,
+            baseline_hat=baseline_hat,
+        )
+        refined_audio = refined.squeeze(1)
+        direct_restored = direct_restored.squeeze(1)
+
+        loss = self._ecg_loss(
+            clean_audio,
+            refined_audio,
+            norm_factor,
+            predicted_com=com_g,
+            valid_mask=valid_mask,
+        )
+        if "dual" in self.loss_fn or "dual_noise" in self.loss_fn:
+            baseline_target = noisy_audio - clean_audio.unsqueeze(1)
+            residual_target = clean_audio.unsqueeze(1) - direct_restored.unsqueeze(1)
+            baseline_loss = F.mse_loss(baseline_hat, baseline_target, reduction="none")
+            residual_loss = F.mse_loss(residual_delta_hat, residual_target, reduction="none")
+            loss = loss + self.lambda_dual_baseline * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+            loss = loss + self.lambda_dual_residual * self._masked_mean(residual_loss.squeeze(1), valid_mask)
+        if "cfm" in self.loss_fn or "flow_matching" in self.loss_fn:
+            estimated_baseline = noisy_audio - base_restored.detach()
+            true_baseline = noisy_audio - clean_audio.unsqueeze(1)
+            target_clean_residual = clean_audio.unsqueeze(1) - base_restored.detach()
+            target_baseline_residual = true_baseline - estimated_baseline
+            target_residual = torch.cat([target_clean_residual, target_baseline_residual], dim=1)
+            channel_weight = [self.lambda_cfm, self.lambda_cfm_baseline]
+            loss = loss + self._flow_matching_loss(
+                condition.detach(),
+                target_residual.detach(),
+                channel_weight=channel_weight,
+                valid_mask=valid_mask,
+            )
+            loss = loss + self._cfm_auxiliary_losses(
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                refined,
+                flow_hat,
+                clean_path,
+                baseline_path,
+                valid_mask=valid_mask,
+            )
+        return loss
+
+# mambattention.py:1236-1386 class UNetResidualFlowDualPathDAPPMambAttentionCore
+class UNetResidualFlowDualPathDAPPMambAttentionCore(ResidualFlowDualPathDAPPMambAttentionCore):
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        h = self.h
+        self.cfm_unet_aux_channels = int(h.get("cfm_unet_aux_channels", 2))
+        self.lambda_ecg_noise_aux = float(h.get("lambda_ecg_noise_aux", 0.35))
+        self.lambda_gaussian_noise_aux = float(h.get("lambda_gaussian_noise_aux", 0.10))
+        self.gaussian_aux_scale = float(h.get("gaussian_aux_scale", 0.2))
+        self.residual_flow = ConditionalResidualFlowUNetRefiner1d(
+            condition_channels=self.cfm_condition_channels,
+            state_channels=2,
+            output_channels=2,
+            base_channels=int(h.get("cfm_unet_base_channels", 64)),
+            channel_mults=tuple(h.get("cfm_unet_channel_mults", [1, 2, 4])),
+            time_dim=int(h.get("cfm_unet_time_dim", 192)),
+            groups=int(h.get("cfm_groups", 8)),
+            dropout=float(h.get("cfm_dropout", 0.0)),
+            pool_scales=tuple(h.get("cfm_unet_pool_scales", [3, 5, 9, 15])),
+            attention_heads=int(h.get("cfm_unet_attention_heads", 4)),
+            use_attention=bool(h.get("cfm_unet_use_attention", True)),
+            mid_dilations=tuple(h.get("cfm_unet_mid_dilations", [1, 2, 4, 8])),
+            aux_output_channels=self.cfm_unet_aux_channels,
+        )
+
+    def _split_unet_output(self, output):
+        velocity = output[:, :2]
+        auxiliary = output[:, 2:] if output.shape[1] > 2 else None
+        return velocity, auxiliary
+
+    def _flow_matching_loss(self, condition, target_residual, channel_weight=1.0, valid_mask=None):
+        start = self._sample_flow_start(target_residual)
+        t = torch.rand((target_residual.shape[0],), device=target_residual.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_residual)
+        residual_state = (1.0 - t_view) * start + t_view * target_residual + bridge_noise
+        target_velocity = target_residual - start
+        predicted_velocity, _ = self._split_unet_output(self.residual_flow(residual_state, condition, t))
+        loss = F.mse_loss(predicted_velocity, target_velocity, reduction="none")
+        weight = torch.as_tensor(channel_weight, device=loss.device, dtype=loss.dtype).view(1, -1, 1)
+        return self._masked_mean((loss * weight).sum(dim=1), valid_mask)
+
+    def _integrate_residual_flow(self, condition, steps=None, start_noise=None):
+        steps = int(steps or self.cfm_inference_steps)
+        steps = max(steps, 1)
+        residual = self._initial_inference_residual(condition, start_noise=start_noise)
+        dt = 1.0 / steps
+        for step in range(steps):
+            t_value = (step + 0.5) / steps
+            t = torch.full((condition.shape[0],), t_value, device=condition.device, dtype=condition.dtype)
+            velocity, _ = self._split_unet_output(self.residual_flow(residual, condition, t))
+            residual = residual + dt * velocity
+        return residual
+
+    def _noise_auxiliary_loss(self, condition, clean_audio, noisy_audio, base_restored, valid_mask=None):
+        if self.cfm_unet_aux_channels < 2 or self.lambda_ecg_noise_aux + self.lambda_gaussian_noise_aux <= 0:
+            return clean_audio.new_tensor(0.0)
+        true_baseline = noisy_audio - clean_audio.unsqueeze(1)
+        gaussian_noise = torch.randn_like(true_baseline)
+        t = torch.rand((true_baseline.shape[0],), device=true_baseline.device)
+        t_view = t.view(-1, 1, 1)
+        sigma = self.gaussian_aux_scale * torch.sqrt((t_view * (1.0 - t_view)).clamp_min(1.0e-8))
+        xt = clean_audio.unsqueeze(1) + t_view * true_baseline + sigma * gaussian_noise
+        aux_state = torch.cat([xt - base_restored.detach(), noisy_audio - xt], dim=1)
+        _, auxiliary = self._split_unet_output(self.residual_flow(aux_state, condition.detach(), t))
+        if auxiliary is None or auxiliary.shape[1] < 2:
+            return clean_audio.new_tensor(0.0)
+        baseline_loss = F.mse_loss(auxiliary[:, 0:1], true_baseline.detach(), reduction="none")
+        gaussian_loss = F.mse_loss(auxiliary[:, 1:2], gaussian_noise.detach(), reduction="none")
+        loss = clean_audio.new_tensor(0.0)
+        if self.lambda_ecg_noise_aux > 0:
+            loss = loss + self.lambda_ecg_noise_aux * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+        if self.lambda_gaussian_noise_aux > 0:
+            loss = loss + self.lambda_gaussian_noise_aux * self._masked_mean(gaussian_loss.squeeze(1), valid_mask)
+        return loss
+
+    def _sanitize_component_outputs(self, base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored):
+        return (
+            torch.nan_to_num(base_restored).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(com_g).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(baseline_hat).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(residual_delta_hat).clamp(-1.0e4, 1.0e4),
+            torch.nan_to_num(direct_restored).clamp(-1.0e4, 1.0e4),
+        )
+
+    def forward(self, clean_audio, noisy_audio, valid_mask=None):
+        norm_factor = self._norm_factor(noisy_audio)
+        clean_audio = (clean_audio * norm_factor).squeeze(1)
+        noisy_audio = noisy_audio * norm_factor
+        if valid_mask is not None:
+            valid_mask = valid_mask.to(noisy_audio.device)
+
+        base_restored, com_g, baseline_hat, residual_delta_hat, direct_restored = self._restore_components(noisy_audio)
+        base_restored = torch.nan_to_num(base_restored).clamp(-1.0e4, 1.0e4)
+        com_g = torch.nan_to_num(com_g).clamp(-1.0e4, 1.0e4)
+        baseline_hat = torch.nan_to_num(baseline_hat).clamp(-1.0e4, 1.0e4)
+        residual_delta_hat = torch.nan_to_num(residual_delta_hat).clamp(-1.0e4, 1.0e4)
+        direct_restored = torch.nan_to_num(direct_restored).clamp(-1.0e4, 1.0e4)
+        refined, flow_hat, condition, clean_path, baseline_path = self._refine_from_base(
+            noisy_audio,
+            base_restored,
+            baseline_hat=baseline_hat,
+        )
+        refined_audio = refined.squeeze(1)
+        direct_restored = direct_restored.squeeze(1)
+
+        loss = self._ecg_loss(
+            clean_audio,
+            refined_audio,
+            norm_factor,
+            predicted_com=com_g,
+            valid_mask=valid_mask,
+        )
+        if "dual" in self.loss_fn or "dual_noise" in self.loss_fn:
+            baseline_target = noisy_audio - clean_audio.unsqueeze(1)
+            residual_target = clean_audio.unsqueeze(1) - direct_restored.unsqueeze(1)
+            baseline_loss = F.mse_loss(baseline_hat, baseline_target, reduction="none")
+            residual_loss = F.mse_loss(residual_delta_hat, residual_target, reduction="none")
+            loss = loss + self.lambda_dual_baseline * self._masked_mean(baseline_loss.squeeze(1), valid_mask)
+            loss = loss + self.lambda_dual_residual * self._masked_mean(residual_loss.squeeze(1), valid_mask)
+        if "cfm" in self.loss_fn or "flow_matching" in self.loss_fn:
+            estimated_baseline = noisy_audio - base_restored.detach()
+            true_baseline = noisy_audio - clean_audio.unsqueeze(1)
+            target_clean_residual = clean_audio.unsqueeze(1) - base_restored.detach()
+            target_baseline_residual = true_baseline - estimated_baseline
+            target_residual = torch.cat([target_clean_residual, target_baseline_residual], dim=1)
+            channel_weight = [self.lambda_cfm, self.lambda_cfm_baseline]
+            loss = loss + self._flow_matching_loss(
+                condition.detach(),
+                target_residual.detach(),
+                channel_weight=channel_weight,
+                valid_mask=valid_mask,
+            )
+            loss = loss + self._cfm_auxiliary_losses(
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                refined,
+                flow_hat,
+                clean_path,
+                baseline_path,
+                valid_mask=valid_mask,
+            )
+        if "noise_aux" in self.loss_fn:
+            loss = loss + self._noise_auxiliary_loss(
+                condition,
+                clean_audio,
+                noisy_audio,
+                base_restored,
+                valid_mask=valid_mask,
+            )
+        return loss
+
+# mambattention.py:1882-1890 class MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+class MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser(ECGDenoisingModel):
+    block_cls = MambAttentionBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = UNetResidualFlowDualPathDAPPMambAttentionCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
+
+# mambattention.py:1894-1897 class MambAttentionDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+class MambAttentionDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
+    MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+):
+    pass
+
+# mambattention.py:1901-1904 class LSTMDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+class LSTMDualPathDAPPCFMUNetBaselineDominantECGDenoiser(
+    MambAttentionSTFrFTDualPathDAPPCFMUNetBaselineDominantECGDenoiser
+):
+    block_cls = LightweightLSTMContextBlock

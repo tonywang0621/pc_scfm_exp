@@ -348,6 +348,23 @@ run_complexity() {
   while IFS= read -r include_arg; do
     [[ -n "$include_arg" ]] && include_args+=("$include_arg")
   done < <(cpu_profile_args)
+  if [[ "$model_key" == "mecge_no_early_stop" ]]; then
+    (
+      cd "$APP_DIR"
+      python3 profile_mecge_no_early_stop_cpu_complexity.py \
+        --config "$config" \
+        --output-yaml "$output_yaml" \
+        --model-key "$model_key" \
+        --device "$DEVICE" \
+        "${include_args[@]}" \
+        --batch-size "$BATCH_SIZE" \
+        --input-length "$INPUT_LENGTH" \
+        --warmup "$WARMUP" \
+        --repeats "$REPEATS" \
+        "${overrides[@]}"
+    )
+    return 0
+  fi
   (
     cd "$APP_DIR"
     python3 profile_config_complexity.py \
