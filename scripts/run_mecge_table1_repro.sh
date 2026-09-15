@@ -62,6 +62,7 @@ Options:
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_60epoch_patience10,
                         bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_100epoch_patience15,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot,
@@ -368,6 +369,9 @@ normalize_model() {
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience"
       ;;
+    lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience)
+      printf '%s\n' "lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience"
+      ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow|lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow)
       printf '%s\n' "dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow"
       ;;
@@ -447,6 +451,7 @@ normalize_model() {
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_60epoch_patience10,
                         bigru_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_100epoch_patience15,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience,
+                        lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_flow_only,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_step1_3shot,
@@ -976,6 +981,9 @@ DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_BIGRU_RESCONVCTX_100E_P15_MODEL_NAME="
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG="configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience.yaml"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME="lstm_dualpath_dapp_cfm_unet_bd_ecg"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_LSTM_RESCONVCTX_30E_NOP_CONFIG="configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience.yaml"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience"
+DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME="lstm_dualpath_dapp_cfm_unet_bd_ecg"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_CONFIG="configs/mecge_table1_repro_lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow.yaml"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_RESULT_MODEL="lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow"
 DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_MODEL_NAME="lstm_dualpath_dapp_no_flow_ecg"
@@ -1154,6 +1162,9 @@ run_selected_models_for_nv() {
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience)
       run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
+      ;;
+    lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_30epoch_no_patience)
+      run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_LSTM_RESCONVCTX_30E_NOP_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_LSTM_RESCONVCTX_30E_NOP_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V8_LSTM_RESCONVCTX_30E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
       ;;
     dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience_no_flow)
       run_official_local_model_job "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_CONFIG" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_RESULT_MODEL" "$DUALPATH_DAPP_CFM_UNET_BD_NO_ATTENTION_V7_LSTM_RESCONVCTX_30E_NOP_NO_FLOW_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"
