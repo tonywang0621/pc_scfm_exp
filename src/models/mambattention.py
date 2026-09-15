@@ -1450,6 +1450,49 @@ class NoisyInputUNetFlowMatchingCore(UNetResidualFlowDualPathDAPPMambAttentionCo
         )
 
 
+class NoDualNoiseHeadUNetResidualFlowDualPathDAPPMambAttentionCore(UNetResidualFlowDualPathDAPPMambAttentionCore):
+    def __init__(self, config, block_cls=MambAttentionBlock):
+        super().__init__(config, block_cls=block_cls)
+        del self.dual_noise_head
+
+    def _restore_components(self, noisy_audio):
+        if noisy_audio.ndim == 3:
+            noisy_audio = noisy_audio.squeeze(1)
+        x, noisy_mag_4d, noisy_pha = self._encode_noisy(noisy_audio)
+        mag_g = (noisy_mag_4d * self.mask_decoder(x)).permute(0, 3, 2, 1).squeeze(-1)
+
+        if self.fea == "cpx":
+            com_d = self.complex_decoder(x).permute(0, 3, 2, 1)
+            com_g = torch.stack(
+                (mag_g * torch.cos(noisy_pha), mag_g * torch.sin(noisy_pha)), dim=-1
+            )
+            pha_g = torch.angle(torch.complex((com_g + com_d)[..., 0], (com_g + com_d)[..., 1]))
+            direct_restored = self._mag_pha_inverse(mag_g, pha_g)
+        elif self.fea == "pha":
+            pha_g = self.phase_decoder(x).permute(0, 3, 2, 1).squeeze(-1)
+            com_g = torch.stack(
+                (mag_g * torch.cos(pha_g), mag_g * torch.sin(pha_g)), dim=-1
+            )
+            direct_restored = self._mag_pha_inverse(mag_g, pha_g)
+        else:
+            b, channels, frames = self.encoder(noisy_audio.unsqueeze(1)).shape
+            com_d = self.complex_decoder(x).permute(0, 1, 3, 2).reshape(b, channels, frames)
+            direct_restored = self.decoder(com_d).squeeze(1)
+            _, _, com_g = self._mag_pha_transform_loss(direct_restored)
+
+        if direct_restored.shape[-1] != noisy_audio.shape[-1]:
+            direct_restored = F.interpolate(
+                direct_restored.unsqueeze(1),
+                size=noisy_audio.shape[-1],
+                mode="linear",
+                align_corners=False,
+            ).squeeze(1)
+        base_restored = direct_restored.unsqueeze(1)
+        baseline_hat = noisy_audio.unsqueeze(1) - base_restored
+        residual_delta_hat = torch.zeros_like(base_restored)
+        return base_restored, com_g, baseline_hat, residual_delta_hat, base_restored
+
+
 class StableUNetResidualFlowDualPathDAPPMambAttentionCore(UNetResidualFlowDualPathDAPPMambAttentionCore):
     """Numerically conservative UNet-CFM refiner for QTDB/NSTDB baseline removal.
 
@@ -1911,6 +1954,18 @@ class LSTMNoisyInputCFMUNetBaselineDominantFlowOnlyECGDenoiser(ECGDenoisingModel
     def __init__(self, **kwargs):
         nn.Module.__init__(self)
         self.core = NoisyInputUNetFlowMatchingCore(
+            {"model": kwargs},
+            block_cls=self.block_cls,
+        )
+
+
+@register_model("lstm_dualpath_dapp_cfm_unet_bd_no_dual_noise_head_ecg")
+class LSTMDualPathDAPPCFMUNetBaselineDominantNoDualNoiseHeadECGDenoiser(ECGDenoisingModel):
+    block_cls = LightweightLSTMContextBlock
+
+    def __init__(self, **kwargs):
+        nn.Module.__init__(self)
+        self.core = NoDualNoiseHeadUNetResidualFlowDualPathDAPPMambAttentionCore(
             {"model": kwargs},
             block_cls=self.block_cls,
         )
