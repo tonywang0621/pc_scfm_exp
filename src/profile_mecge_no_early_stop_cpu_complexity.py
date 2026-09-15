@@ -60,8 +60,89 @@ def enable_mamba_cpu_reference_kernels():
     mamba_simple.causal_conv1d_update = None
     mamba_simple.mamba_inner_fn = None
 
-    layer_norm.rms_norm_fn = layer_norm.rms_norm_ref
-    layer_norm.layer_norm_fn = layer_norm.layer_norm_ref
+    def rms_norm_cpu_ref(
+        x,
+        weight,
+        bias,
+        residual=None,
+        x1=None,
+        weight1=None,
+        bias1=None,
+        eps=1e-6,
+        dropout_p=0.0,
+        rowscale=None,
+        prenorm=False,
+        residual_in_fp32=False,
+        return_dropout_mask=False,
+        **kwargs,
+    ):
+        if residual is not None and residual_in_fp32:
+            residual = residual.float()
+        return layer_norm.rms_norm_ref(
+            x,
+            weight,
+            bias,
+            residual=residual,
+            x1=x1,
+            weight1=weight1,
+            bias1=bias1,
+            eps=eps,
+            dropout_p=dropout_p,
+            rowscale=rowscale,
+            prenorm=prenorm,
+        )
+
+    def layer_norm_cpu_ref(
+        x,
+        weight,
+        bias,
+        residual=None,
+        x1=None,
+        weight1=None,
+        bias1=None,
+        eps=1e-6,
+        dropout_p=0.0,
+        rowscale=None,
+        prenorm=False,
+        residual_in_fp32=False,
+        is_rms_norm=False,
+        return_dropout_mask=False,
+        **kwargs,
+    ):
+        if is_rms_norm:
+            return rms_norm_cpu_ref(
+                x,
+                weight,
+                bias,
+                residual=residual,
+                x1=x1,
+                weight1=weight1,
+                bias1=bias1,
+                eps=eps,
+                dropout_p=dropout_p,
+                rowscale=rowscale,
+                prenorm=prenorm,
+                residual_in_fp32=residual_in_fp32,
+                return_dropout_mask=return_dropout_mask,
+            )
+        if residual is not None and residual_in_fp32:
+            residual = residual.float()
+        return layer_norm.layer_norm_ref(
+            x,
+            weight,
+            bias,
+            residual=residual,
+            x1=x1,
+            weight1=weight1,
+            bias1=bias1,
+            eps=eps,
+            dropout_p=dropout_p,
+            rowscale=rowscale,
+            prenorm=prenorm,
+        )
+
+    layer_norm.rms_norm_fn = rms_norm_cpu_ref
+    layer_norm.layer_norm_fn = layer_norm_cpu_ref
 
 
 def force_mamba_reference_path(model):
