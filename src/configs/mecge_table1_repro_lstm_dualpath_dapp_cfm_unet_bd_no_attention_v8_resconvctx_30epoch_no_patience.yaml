@@ -76,15 +76,15 @@ model:
   d_state: 8
   d_conv: 8
   expand: 2
-  lstm_hidden: 32
-  lstm_dropout: 0.08
+  lstm_hidden: 24
+  lstm_dropout: 0.04
   norm_epsilon: 1.0e-5
   attention_position: "before_mamba"
   attention_num_blocks: 1
   attention_replacement: "residual_dilated_conv"
   attention_conv_kernel_size: 7
   attention_conv_dilations: [1, 2, 4, 8]
-  attention_conv_dropout: 0.06
+  attention_conv_dropout: 0.03
   use_time_attention: true
   use_freq_attention: true
   time_frequency_transform: "stft"
@@ -110,11 +110,11 @@ model:
   cfm_blocks: 6
   cfm_time_dim: 96
   cfm_groups: 8
-  cfm_dropout: 0.08
+  cfm_dropout: 0.06
   cfm_dilations: [1, 2, 4, 8]
   cfm_inference_steps: 1
   cfm_use_adaptive_gate: true
-  cfm_gate_hidden: 32
+  cfm_gate_hidden: 24
   cfm_clean_delta_budget: 0.08
   cfm_baseline_delta_budget: 0.95
   cfm_project_baseline_delta: true
@@ -132,7 +132,7 @@ model:
     - [32, 4, 32]
     - [64, 8, 64]
     - [128, 16, 128]
-  lambda_cfm: 0.035
+  lambda_cfm: 0.04
   lambda_cfm_baseline: 0.13
   lambda_cfm_recon: 0.72
   lambda_cfm_stft: 0.01

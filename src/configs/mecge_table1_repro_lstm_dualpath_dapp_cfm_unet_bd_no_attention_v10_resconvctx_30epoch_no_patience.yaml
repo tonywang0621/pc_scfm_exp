@@ -1,11 +1,11 @@
 data_dir: "../data/mecge_table1_repro"
-root_dir: "../runs/mecge_table1_repro/lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_60epoch_no_patience"
+root_dir: "../runs/mecge_table1_repro/lstm_dualpath_dapp_cfm_unet_bd_no_attention_v10_resconvctx_30epoch_no_patience"
 
 checkpoint_dir: "${root_dir}/checkpoint"
 results_dir: "${root_dir}/results"
 log_dir: "${root_dir}/log"
 
-exp_name: lstm_dualpath_dapp_cfm_unet_bd_no_attention_v8_resconvctx_60epoch_no_patience__qtdb_train_qtdb_test__nv1__seed42
+exp_name: lstm_dualpath_dapp_cfm_unet_bd_no_attention_v10_resconvctx_30epoch_no_patience__qtdb_train_qtdb_test__nv1__seed42
 model_name: lstm_dualpath_dapp_cfm_unet_bd_ecg
 seed: 42
 log_tensorboard: True
@@ -13,7 +13,7 @@ log_config: False
 log_model_architecture: False
 
 training:
-  train_epochs: 60
+  train_epochs: 30
   batch_size: 64
   lr: 5.0e-5
   optimizer: AdamW
@@ -72,7 +72,7 @@ model:
   norm: False
   dense_channel: 32
   compress_factor: 0.3
-  num_tscblocks: 1
+  num_tscblocks: 4
   d_state: 8
   d_conv: 8
   expand: 2
@@ -80,7 +80,7 @@ model:
   lstm_dropout: 0.04
   norm_epsilon: 1.0e-5
   attention_position: "before_mamba"
-  attention_num_blocks: 1
+  attention_num_blocks: 4
   attention_replacement: "residual_dilated_conv"
   attention_conv_kernel_size: 7
   attention_conv_dilations: [1, 2, 4, 8]
