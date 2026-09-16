@@ -1167,6 +1167,265 @@ class ECGDenoisingModel(nn.Module):
         return self.core(clean, noisy, valid_mask=valid_mask)
 
 
+class ResidualCFMTimeEmbedding(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = int(dim)
+
+    def forward(self, t):
+        half = self.dim // 2
+        freqs = torch.exp(
+            torch.arange(half, device=t.device, dtype=t.dtype)
+            * (-math.log(10000.0) / max(half - 1, 1))
+        )
+        args = t[:, None] * freqs[None, :]
+        emb = torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
+        if emb.shape[-1] < self.dim:
+            emb = F.pad(emb, (0, self.dim - emb.shape[-1]))
+        return emb
+
+
+class ResidualCFMBlock1d(nn.Module):
+    def __init__(self, channels, time_dim, groups=8, dropout=0.0, dilation=1):
+        super().__init__()
+        group_count = min(int(groups), int(channels))
+        while channels % group_count != 0:
+            group_count -= 1
+        self.conv1 = nn.Conv1d(channels, channels, 3, padding=dilation, dilation=dilation)
+        self.norm1 = nn.GroupNorm(group_count, channels)
+        self.time_proj = nn.Linear(time_dim, channels)
+        self.conv2 = nn.Conv1d(channels, channels, 3, padding=dilation, dilation=dilation)
+        self.norm2 = nn.GroupNorm(group_count, channels)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, time_emb):
+        residual = x
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = F.silu(x + self.time_proj(time_emb).unsqueeze(-1))
+        x = self.dropout(x)
+        x = self.conv2(x)
+        x = self.norm2(x)
+        return F.silu(x + residual)
+
+
+class ConditionalResidualCFMRefiner1d(nn.Module):
+    def __init__(
+        self,
+        condition_channels=3,
+        state_channels=1,
+        channels=64,
+        blocks=6,
+        time_dim=128,
+        groups=8,
+        dropout=0.0,
+        dilations=(1, 2, 4, 8),
+    ):
+        super().__init__()
+        channels = int(channels)
+        time_dim = int(time_dim)
+        self.time_embedding = nn.Sequential(
+            ResidualCFMTimeEmbedding(time_dim),
+            nn.Linear(time_dim, time_dim),
+            nn.SiLU(),
+            nn.Linear(time_dim, time_dim),
+        )
+        self.input = nn.Conv1d(int(condition_channels) + int(state_channels), channels, 3, padding=1)
+        dilation_values = list(dilations) or [1]
+        self.blocks = nn.ModuleList(
+            [
+                ResidualCFMBlock1d(
+                    channels,
+                    time_dim,
+                    groups=groups,
+                    dropout=dropout,
+                    dilation=int(dilation_values[index % len(dilation_values)]),
+                )
+                for index in range(int(blocks))
+            ]
+        )
+        self.output = nn.Sequential(
+            nn.GroupNorm(1, channels),
+            nn.SiLU(),
+            nn.Conv1d(channels, 1, 3, padding=1),
+        )
+
+    def forward(self, residual_state, condition, t):
+        if t.ndim == 0:
+            t = t.expand(residual_state.shape[0])
+        time_emb = self.time_embedding(t)
+        x = self.input(torch.cat([residual_state, condition], dim=1))
+        for block in self.blocks:
+            x = block(x, time_emb)
+        return self.output(x)
+
+
+@register_model("mecge_frozen_residual_cfm_ecg")
+class MECGEFrozenResidualCFMDenoiser(nn.Module):
+    """Frozen MECG-E followed by a pure residual flow-matching refiner.
+
+    The second stage optimizes only the conditional flow-matching velocity MSE
+    for target_residual = clean - frozen_mecge(noisy). It deliberately avoids
+    reconstruction, morphology, LF, STFT, and auxiliary losses.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.h = AttrDict(kwargs)
+        self.mecge_checkpoint = self.h.get("mecge_checkpoint", None)
+        self.mecge = MECGEDenoiser(**kwargs)
+        if self.mecge_checkpoint:
+            self._load_frozen_mecge_checkpoint(self.mecge_checkpoint)
+        elif bool(self.h.get("require_mecge_checkpoint", True)):
+            raise ValueError("model.mecge_checkpoint is required for mecge_frozen_residual_cfm_ecg.")
+        for parameter in self.mecge.parameters():
+            parameter.requires_grad_(False)
+        self.mecge.eval()
+
+        self.cfm_inference_steps = int(self.h.get("cfm_inference_steps", 1))
+        self.cfm_train_noise_scale = float(self.h.get("cfm_train_noise_scale", 0.05))
+        self.cfm_zero_start_prob = float(self.h.get("cfm_zero_start_prob", 0.5))
+        self.cfm_bridge_noise_scale = float(self.h.get("cfm_bridge_noise_scale", 0.0))
+        self.cfm_inference_start_noise_scale = float(self.h.get("cfm_inference_start_noise_scale", 0.0))
+        self.condition_mode = str(self.h.get("cfm_condition_mode", "noisy_base_residual")).lower()
+        if self.condition_mode == "base":
+            condition_channels = 1
+        elif self.condition_mode == "noisy_base":
+            condition_channels = 2
+        elif self.condition_mode == "noisy_base_residual":
+            condition_channels = 3
+        else:
+            raise ValueError(
+                "model.cfm_condition_mode must be one of: base, noisy_base, noisy_base_residual."
+            )
+        self.residual_flow = ConditionalResidualCFMRefiner1d(
+            condition_channels=condition_channels,
+            state_channels=1,
+            channels=int(self.h.get("cfm_channels", 32)),
+            blocks=int(self.h.get("cfm_blocks", 6)),
+            time_dim=int(self.h.get("cfm_time_dim", 96)),
+            groups=int(self.h.get("cfm_groups", 8)),
+            dropout=float(self.h.get("cfm_dropout", 0.0)),
+            dilations=tuple(self.h.get("cfm_dilations", [1, 2, 4, 8])),
+        )
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.mecge.eval()
+        return self
+
+    def _load_frozen_mecge_checkpoint(self, checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            checkpoint = checkpoint["model_state_dict"]
+        if not isinstance(checkpoint, dict):
+            raise ValueError(f"MECG-E checkpoint must be a state_dict or training_state dict: {checkpoint_path}")
+        state = {
+            str(key).removeprefix("module."): value
+            for key, value in checkpoint.items()
+        }
+        full_keys = set(self.mecge.state_dict().keys())
+        core_keys = set(self.mecge.core.state_dict().keys())
+        full_matches = sum(1 for key in state if key in full_keys)
+        core_matches = sum(1 for key in state if key in core_keys)
+        prefixed_core = {f"core.{key}": value for key, value in state.items()}
+        prefixed_matches = sum(1 for key in prefixed_core if key in full_keys)
+        if full_matches >= core_matches and full_matches >= prefixed_matches and full_matches > 0:
+            self.mecge.load_state_dict(state, strict=False)
+        elif prefixed_matches >= core_matches and prefixed_matches > 0:
+            self.mecge.load_state_dict(prefixed_core, strict=False)
+        elif core_matches > 0:
+            self.mecge.core.load_state_dict(state, strict=False)
+        else:
+            raise RuntimeError(
+                f"No MECG-E parameters in checkpoint matched this model: {checkpoint_path}"
+            )
+
+    def _norm_factor(self, noisy):
+        return self.mecge.core._norm_factor(noisy)
+
+    def _condition(self, noisy_audio, base_restored):
+        if self.condition_mode == "base":
+            return base_restored
+        if self.condition_mode == "noisy_base":
+            return torch.cat([noisy_audio, base_restored], dim=1)
+        return torch.cat([noisy_audio, base_restored, noisy_audio - base_restored], dim=1)
+
+    def _frozen_base(self, noisy_audio):
+        with torch.no_grad():
+            return self.mecge.core.restore(noisy_audio)
+
+    def _sample_flow_start(self, target_residual):
+        start = self.cfm_train_noise_scale * torch.randn_like(target_residual)
+        if self.cfm_zero_start_prob > 0:
+            zero_mask = (
+                torch.rand((target_residual.shape[0], 1, 1), device=target_residual.device)
+                < self.cfm_zero_start_prob
+            )
+            start = torch.where(zero_mask, torch.zeros_like(start), start)
+        return start
+
+    def _masked_mean(self, loss, valid_mask=None):
+        if valid_mask is None:
+            return loss.mean()
+        mask = valid_mask.to(loss.device, dtype=loss.dtype)
+        if mask.ndim == 3:
+            mask = mask.squeeze(1)
+        return (loss * mask).sum() / mask.sum().clamp_min(1.0)
+
+    def _flow_matching_loss(self, condition, target_residual, valid_mask=None):
+        start = self._sample_flow_start(target_residual)
+        t = torch.rand((target_residual.shape[0],), device=target_residual.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_residual)
+        residual_state = (1.0 - t_view) * start + t_view * target_residual + bridge_noise
+        target_velocity = target_residual - start
+        predicted_velocity = self.residual_flow(residual_state, condition, t)
+        loss = F.mse_loss(predicted_velocity, target_velocity, reduction="none").squeeze(1)
+        return self._masked_mean(loss, valid_mask=valid_mask)
+
+    def _integrate_residual_flow(self, condition):
+        steps = max(int(self.cfm_inference_steps), 1)
+        residual = condition.new_zeros((condition.shape[0], 1, condition.shape[-1]))
+        if self.cfm_inference_start_noise_scale > 0:
+            residual = residual + self.cfm_inference_start_noise_scale * torch.randn_like(residual)
+        dt = 1.0 / steps
+        for step in range(steps):
+            t_value = (step + 0.5) / steps
+            t = torch.full((condition.shape[0],), t_value, device=condition.device, dtype=condition.dtype)
+            residual = residual + dt * self.residual_flow(residual, condition, t)
+        return residual
+
+    def forward(self, x):
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        norm_factor = self._norm_factor(x)
+        noisy_norm = x * norm_factor
+        base_norm = self._frozen_base(noisy_norm)
+        condition = self._condition(noisy_norm, base_norm)
+        residual_norm = self._integrate_residual_flow(condition)
+        return (base_norm + residual_norm) / norm_factor
+
+    @torch.no_grad()
+    def denoising(self, x):
+        return self.forward(x)
+
+    def compute_loss(self, batch, device, **kwargs):
+        noisy, clean = batch[0].to(device), batch[1].to(device)
+        valid_mask = batch[2].to(device) if len(batch) > 2 else None
+        if noisy.ndim == 2:
+            noisy = noisy.unsqueeze(1)
+        if clean.ndim == 2:
+            clean = clean.unsqueeze(1)
+        norm_factor = self._norm_factor(noisy)
+        noisy_norm = noisy * norm_factor
+        clean_norm = clean * norm_factor
+        base_norm = self._frozen_base(noisy_norm)
+        condition = self._condition(noisy_norm, base_norm).detach()
+        target_residual = (clean_norm - base_norm).detach()
+        return self._flow_matching_loss(condition, target_residual, valid_mask=valid_mask)
+
+
 @register_model("mecg_e")
 class MECGEDenoiser(ECGDenoisingModel):
     """MECG-E: Mamba-based ECG Enhancer for baseline wander removal
