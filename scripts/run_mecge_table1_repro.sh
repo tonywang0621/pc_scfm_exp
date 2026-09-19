@@ -50,6 +50,7 @@ Options:
                         mecge_frozen_baseline_cfm_30epoch_no_patience,
                         mecge_frozen_residual_cfm_100epoch_no_patience,
                         mecge_frozen_residual_cfm_400epoch_no_patience,
+                        mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience,
                         dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4,
                         dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8,
                         dualpath_dapp_cfm_unet_bd_no_attention,
@@ -341,6 +342,9 @@ normalize_model() {
     mecge_frozen_residual_cfm_400epoch_no_patience)
       printf '%s\n' "mecge_frozen_residual_cfm_400epoch_no_patience"
       ;;
+    mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience|mecge_no_early_stop_safe_residual_cfm|mecge_safe_residual_cfm|mecg_e_no_early_stop_safe_residual_cfm)
+      printf '%s\n' "mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience"
+      ;;
     mambattention|mambattention_ecg)
       printf '%s\n' "mambattention"
       ;;
@@ -495,7 +499,7 @@ normalize_model() {
       printf '%s\n' "eddm_10shot"
       ;;
     *)
-      echo "Unsupported --model '$1'. Expected one of: all, mecge, mecge_no_early_stop, mecge_frozen_residual_cfm_30epoch_no_patience, mecge_frozen_baseline_cfm_30epoch_no_patience, mecge_frozen_residual_cfm_100epoch_no_patience, mecge_frozen_residual_cfm_400epoch_no_patience, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, dualpath_dapp_cfm_unet_bd_no_attention_v2, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_bd_v3, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v3_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_100epoch_patience15,
+      echo "Unsupported --model '$1'. Expected one of: all, mecge, mecge_no_early_stop, mecge_frozen_residual_cfm_30epoch_no_patience, mecge_frozen_baseline_cfm_30epoch_no_patience, mecge_frozen_residual_cfm_100epoch_no_patience, mecge_frozen_residual_cfm_400epoch_no_patience, mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience, mambattention, dualpath_dapp_cfm_unet_bd, dualpath_dapp_cfm_unet_bd_step3, dualpath_dapp_cfm_unet_bd_step4, dualpath_dapp_cfm_unet_bd_step5, dualpath_dapp_cfm_unet_bd_step8, dualpath_dapp_cfm_unet_bd_no_attention, dualpath_dapp_cfm_unet_bd_no_attention_v2, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_bd_v3, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v3_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4b_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_150epoch_patience20, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v4c_baseline_100epoch_patience15, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_150epoch_patience20, mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_100epoch_patience15,
                         mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v5_convctx_60epoch_patience10,
                         mambattention_dualpath_dapp_cfm_unet_bd_no_attention_v6_resconvctx_60epoch_patience10,
                         lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_60epoch_patience10,
@@ -992,6 +996,9 @@ MECGE_FROZEN_RESIDUAL_CFM_100E_NOP_MODEL_NAME="mecge_frozen_residual_cfm_ecg"
 MECGE_FROZEN_RESIDUAL_CFM_400E_NOP_CONFIG="configs/mecge_table1_repro_mecge_frozen_residual_cfm_400epoch_no_patience.yaml"
 MECGE_FROZEN_RESIDUAL_CFM_400E_NOP_RESULT_MODEL="mecge_frozen_residual_cfm_400epoch_no_patience"
 MECGE_FROZEN_RESIDUAL_CFM_400E_NOP_MODEL_NAME="mecge_frozen_residual_cfm_ecg"
+MECGE_SAFE_RESIDUAL_CFM_CONFIG="configs/mecge_table1_repro_mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience.yaml"
+MECGE_SAFE_RESIDUAL_CFM_RESULT_MODEL="mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience"
+MECGE_SAFE_RESIDUAL_CFM_MODEL_NAME="mecge_no_early_stop_safe_residual_cfm_ecg"
 MAMBATTENTION_CONFIG="configs/mecge_table1_repro_mambattention.yaml"
 MAMBATTENTION_RESULT_MODEL="mambattention"
 MAMBATTENTION_MODEL_NAME="mambattention_ecg"
@@ -1207,6 +1214,10 @@ run_selected_models_for_nv() {
     mecge_frozen_residual_cfm_400epoch_no_patience)
       mecge_checkpoint="$RUN_ROOT/$MECGE_NO_EARLY_STOP_RESULT_MODEL/checkpoint/${MECGE_NO_EARLY_STOP_RESULT_MODEL}__qtdb_train_qtdb_test__nv${nv}__seed3407/$MECGE_MODEL_NAME/best_model.pt"
       run_official_local_model_job "$MECGE_FROZEN_RESIDUAL_CFM_400E_NOP_CONFIG" "$MECGE_FROZEN_RESIDUAL_CFM_400E_NOP_RESULT_MODEL" "$MECGE_FROZEN_RESIDUAL_CFM_400E_NOP_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "model.mecge_checkpoint=$mecge_checkpoint"
+      ;;
+    mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience)
+      mecge_checkpoint="$RUN_ROOT/$MECGE_NO_EARLY_STOP_RESULT_MODEL/checkpoint/${MECGE_NO_EARLY_STOP_RESULT_MODEL}__qtdb_train_qtdb_test__nv${nv}__seed3407/$MECGE_MODEL_NAME/best_model.pt"
+      run_official_local_model_job "$MECGE_SAFE_RESIDUAL_CFM_CONFIG" "$MECGE_SAFE_RESIDUAL_CFM_RESULT_MODEL" "$MECGE_SAFE_RESIDUAL_CFM_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file" "model.mecge_checkpoint=$mecge_checkpoint"
       ;;
     mambattention)
       run_one_job "$MAMBATTENTION_CONFIG" "$MAMBATTENTION_RESULT_MODEL" "$MAMBATTENTION_MODEL_NAME" "${TARGET_SEED:-3407}" "$nv" "$pkl_file"

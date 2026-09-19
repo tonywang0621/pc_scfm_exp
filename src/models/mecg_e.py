@@ -1330,15 +1330,39 @@ class MECGEFrozenResidualCFMDenoiser(nn.Module):
         core_matches = sum(1 for key in state if key in core_keys)
         prefixed_core = {f"core.{key}": value for key, value in state.items()}
         prefixed_matches = sum(1 for key in prefixed_core if key in full_keys)
+        min_ratio = float(self.h.get("mecge_checkpoint_min_match_ratio", 0.95))
         if full_matches >= core_matches and full_matches >= prefixed_matches and full_matches > 0:
-            self.mecge.load_state_dict(state, strict=False)
+            load_result = self.mecge.load_state_dict(state, strict=False)
+            matched, expected = full_matches, len(full_keys)
+            load_scope = "full"
         elif prefixed_matches >= core_matches and prefixed_matches > 0:
-            self.mecge.load_state_dict(prefixed_core, strict=False)
+            load_result = self.mecge.load_state_dict(prefixed_core, strict=False)
+            matched, expected = prefixed_matches, len(full_keys)
+            load_scope = "prefixed_core"
         elif core_matches > 0:
-            self.mecge.core.load_state_dict(state, strict=False)
+            load_result = self.mecge.core.load_state_dict(state, strict=False)
+            matched, expected = core_matches, len(core_keys)
+            load_scope = "core"
         else:
             raise RuntimeError(
                 f"No MECG-E parameters in checkpoint matched this model: {checkpoint_path}"
+            )
+        match_ratio = matched / max(expected, 1)
+        if match_ratio < min_ratio:
+            raise RuntimeError(
+                f"MECG-E checkpoint load matched only {matched}/{expected} keys "
+                f"({match_ratio:.3f}) in {load_scope} scope; expected at least {min_ratio:.3f}: "
+                f"{checkpoint_path}"
+            )
+        if load_result.unexpected_keys:
+            print(
+                f"Loaded frozen MECG-E checkpoint with {len(load_result.unexpected_keys)} "
+                f"unexpected keys ignored from {checkpoint_path}."
+            )
+        if load_result.missing_keys:
+            print(
+                f"Loaded frozen MECG-E checkpoint scope={load_scope}, matched={matched}/{expected}; "
+                f"missing keys={len(load_result.missing_keys)}."
             )
 
     def _norm_factor(self, noisy):
@@ -1424,6 +1448,106 @@ class MECGEFrozenResidualCFMDenoiser(nn.Module):
         condition = self._condition(noisy_norm, base_norm).detach()
         target_residual = (clean_norm - base_norm).detach()
         return self._flow_matching_loss(condition, target_residual, valid_mask=valid_mask)
+
+
+@register_model("mecge_no_early_stop_safe_residual_cfm_ecg")
+class MECGENoEarlyStopSafeResidualCFMDenoiser(MECGEFrozenResidualCFMDenoiser):
+    """Frozen mecg_e_no_early_stop teacher with a bounded residual CFM refiner.
+
+    This variant keeps the teacher output as the default answer and lets the
+    flow module make only a small, bounded correction. It is meant for testing
+    model-agnostic post-refinement without letting a bad flow overwrite a good
+    denoiser output.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        h = self.h
+        self.lambda_cfm = float(h.get("lambda_cfm", 1.0))
+        self.lambda_recon = float(h.get("lambda_recon", 1.0))
+        self.lambda_identity = float(h.get("lambda_identity", 0.05))
+        self.lambda_residual_smooth = float(h.get("lambda_residual_smooth", 0.02))
+        self.cfm_loss_type = str(h.get("cfm_loss_type", "smooth_l1")).lower()
+        self.residual_delta_budget = float(h.get("cfm_residual_delta_budget", 0.10))
+        self.output_blend = float(h.get("output_blend", 1.0))
+        gate_init = float(h.get("cfm_residual_gate_init", 0.05))
+        self.residual_gate_max = float(h.get("cfm_residual_gate_max", 0.20))
+        gate_ratio = min(max(gate_init / max(self.residual_gate_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.residual_gate_raw = nn.Parameter(
+            torch.tensor(math.log(gate_ratio / (1.0 - gate_ratio)), dtype=torch.float32)
+        )
+
+    def _residual_gate(self):
+        return self.residual_gate_max * torch.sigmoid(self.residual_gate_raw)
+
+    def _limit_residual(self, residual, reference):
+        if self.residual_delta_budget <= 0:
+            return residual
+        scale = reference.detach().abs().mean(dim=-1, keepdim=True)
+        scale = scale + 0.25 * reference.detach().std(dim=-1, keepdim=True)
+        limit = self.residual_delta_budget * scale.clamp_min(1.0e-4)
+        return torch.clamp(residual, min=-limit, max=limit)
+
+    def _loss_elementwise(self, prediction, target):
+        if self.cfm_loss_type == "mse":
+            return F.mse_loss(prediction, target, reduction="none")
+        if self.cfm_loss_type == "l1":
+            return F.l1_loss(prediction, target, reduction="none")
+        return F.smooth_l1_loss(prediction, target, reduction="none")
+
+    def _flow_matching_loss(self, condition, target_residual, valid_mask=None):
+        start = self._sample_flow_start(target_residual)
+        t = torch.rand((target_residual.shape[0],), device=target_residual.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_residual)
+        residual_state = (1.0 - t_view) * start + t_view * target_residual + bridge_noise
+        target_velocity = target_residual - start
+        predicted_velocity = self.residual_flow(residual_state, condition, t)
+        loss = self._loss_elementwise(predicted_velocity, target_velocity).squeeze(1)
+        return self._masked_mean(loss, valid_mask=valid_mask)
+
+    def _refine_from_base(self, noisy_norm, base_norm):
+        condition = self._condition(noisy_norm, base_norm)
+        residual = self._integrate_residual_flow(condition)
+        residual = self._limit_residual(residual, base_norm)
+        gated_residual = self._residual_gate() * residual
+        return base_norm + self.output_blend * gated_residual, residual
+
+    def forward(self, x):
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        norm_factor = self._norm_factor(x)
+        noisy_norm = x * norm_factor
+        base_norm = self._frozen_base(noisy_norm)
+        refined_norm, _ = self._refine_from_base(noisy_norm, base_norm)
+        return refined_norm / norm_factor
+
+    def compute_loss(self, batch, device, **kwargs):
+        noisy, clean = batch[0].to(device), batch[1].to(device)
+        valid_mask = batch[2].to(device) if len(batch) > 2 else None
+        if noisy.ndim == 2:
+            noisy = noisy.unsqueeze(1)
+        if clean.ndim == 2:
+            clean = clean.unsqueeze(1)
+        norm_factor = self._norm_factor(noisy)
+        noisy_norm = noisy * norm_factor
+        clean_norm = clean * norm_factor
+        base_norm = self._frozen_base(noisy_norm)
+        condition = self._condition(noisy_norm, base_norm).detach()
+        target_residual = self._limit_residual(clean_norm - base_norm, base_norm).detach()
+
+        loss = self.lambda_cfm * self._flow_matching_loss(condition, target_residual, valid_mask=valid_mask)
+        refined_norm, residual = self._refine_from_base(noisy_norm, base_norm)
+        if self.lambda_recon > 0:
+            recon = self._loss_elementwise(refined_norm, clean_norm).squeeze(1)
+            loss = loss + self.lambda_recon * self._masked_mean(recon, valid_mask=valid_mask)
+        if self.lambda_identity > 0:
+            identity = F.l1_loss(refined_norm, base_norm, reduction="none").squeeze(1)
+            loss = loss + self.lambda_identity * self._masked_mean(identity, valid_mask=valid_mask)
+        if self.lambda_residual_smooth > 0:
+            smooth = residual[..., 1:] - residual[..., :-1]
+            loss = loss + self.lambda_residual_smooth * smooth.abs().mean()
+        return loss
 
 
 @register_model("mecge_frozen_baseline_cfm_ecg")

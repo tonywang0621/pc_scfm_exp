@@ -74,6 +74,9 @@ case "$MODEL" in
   mecge_resflow_lite)
     CONFIG="configs/mecge_table1_repro_mecge_resflow_lite.yaml"
     ;;
+  mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience|mecge_no_early_stop_safe_residual_cfm|mecge_safe_residual_cfm|mecg_e_no_early_stop_safe_residual_cfm)
+    CONFIG="configs/mecge_table1_repro_mecge_no_early_stop_safe_residual_cfm_30epoch_no_patience.yaml"
+    ;;
   mambattention_stfrft_eddm_distill|mambattention_stfrft_eddm_distill_ecg)
     CONFIG="configs/ecg_baseline_wander_mambattention_stfrft_eddm_distill.yaml"
     ;;
