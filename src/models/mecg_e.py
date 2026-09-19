@@ -1426,6 +1426,107 @@ class MECGEFrozenResidualCFMDenoiser(nn.Module):
         return self._flow_matching_loss(condition, target_residual, valid_mask=valid_mask)
 
 
+@register_model("mecge_frozen_baseline_cfm_ecg")
+class MECGEFrozenBaselineCFMDenoiser(MECGEFrozenResidualCFMDenoiser):
+    """Frozen MECG-E with a bounded baseline-domain CFM correction."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        h = self.h
+        self.lambda_baseline_cfm = float(h.get("lambda_baseline_cfm", 1.0))
+        self.lambda_recon = float(h.get("lambda_recon", 0.5))
+        self.delta_budget = float(h.get("cfm_baseline_delta_budget", 0.35))
+        self.project_delta = bool(h.get("cfm_project_baseline_delta", True))
+        self.cfm_loss_type = str(h.get("cfm_loss_type", "smooth_l1")).lower()
+        self.output_blend = float(h.get("output_blend", 1.0))
+        gate_init = float(h.get("baseline_cfm_gate_init", 0.05))
+        self.baseline_cfm_gate_max = float(h.get("baseline_cfm_gate_max", 1.0))
+        gate_ratio = min(max(gate_init / max(self.baseline_cfm_gate_max, 1.0e-6), 1.0e-6), 1.0 - 1.0e-6)
+        self.baseline_cfm_gate_raw = nn.Parameter(
+            torch.tensor(math.log(gate_ratio / (1.0 - gate_ratio)), dtype=torch.float32)
+        )
+
+    def _baseline_cfm_gate(self):
+        return self.baseline_cfm_gate_max * torch.sigmoid(self.baseline_cfm_gate_raw)
+
+    def _project_baseline_delta(self, delta):
+        if not self.project_delta:
+            return delta
+        return self.mecge.core._baseline_projection(delta)
+
+    def _limit_delta(self, delta, reference):
+        if self.delta_budget <= 0:
+            return delta
+        scale = reference.detach().abs().mean(dim=-1, keepdim=True)
+        scale = scale + 0.25 * reference.detach().std(dim=-1, keepdim=True)
+        limit = self.delta_budget * scale.clamp_min(1.0e-4)
+        return torch.clamp(delta, min=-limit, max=limit)
+
+    def _loss_elementwise(self, prediction, target):
+        if self.cfm_loss_type == "mse":
+            return F.mse_loss(prediction, target, reduction="none")
+        if self.cfm_loss_type == "l1":
+            return F.l1_loss(prediction, target, reduction="none")
+        return F.smooth_l1_loss(prediction, target, reduction="none")
+
+    def _flow_matching_loss(self, condition, target_delta, valid_mask=None):
+        start = self._sample_flow_start(target_delta)
+        t = torch.rand((target_delta.shape[0],), device=target_delta.device)
+        t_view = t.view(-1, 1, 1)
+        bridge_noise = self.cfm_bridge_noise_scale * torch.sin(torch.pi * t_view) * torch.randn_like(target_delta)
+        residual_state = (1.0 - t_view) * start + t_view * target_delta + bridge_noise
+        target_velocity = target_delta - start
+        predicted_velocity = self.residual_flow(residual_state, condition, t)
+        loss = self._loss_elementwise(predicted_velocity, target_velocity).squeeze(1)
+        return self._masked_mean(loss, valid_mask=valid_mask)
+
+    def _baseline_delta(self, condition, base_baseline):
+        delta = self._integrate_residual_flow(condition)
+        delta = self._project_baseline_delta(delta)
+        return self._limit_delta(delta, base_baseline)
+
+    def _refine_from_base(self, noisy_norm, base_norm):
+        base_baseline = noisy_norm - base_norm
+        condition = self._condition(noisy_norm, base_norm)
+        delta = self._baseline_delta(condition, base_baseline)
+        gate = self._baseline_cfm_gate()
+        refined = noisy_norm - (base_baseline + gate * delta)
+        return base_norm + self.output_blend * (refined - base_norm)
+
+    def forward(self, x):
+        if x.ndim == 2:
+            x = x.unsqueeze(1)
+        norm_factor = self._norm_factor(x)
+        noisy_norm = x * norm_factor
+        base_norm = self._frozen_base(noisy_norm)
+        refined_norm = self._refine_from_base(noisy_norm, base_norm)
+        return refined_norm / norm_factor
+
+    def compute_loss(self, batch, device, **kwargs):
+        noisy, clean = batch[0].to(device), batch[1].to(device)
+        valid_mask = batch[2].to(device) if len(batch) > 2 else None
+        if noisy.ndim == 2:
+            noisy = noisy.unsqueeze(1)
+        if clean.ndim == 2:
+            clean = clean.unsqueeze(1)
+        norm_factor = self._norm_factor(noisy)
+        noisy_norm = noisy * norm_factor
+        clean_norm = clean * norm_factor
+        base_norm = self._frozen_base(noisy_norm)
+        base_baseline = noisy_norm - base_norm
+        true_baseline = noisy_norm - clean_norm
+        target_delta = self._project_baseline_delta(true_baseline - base_baseline).detach()
+        target_delta = self._limit_delta(target_delta, base_baseline).detach()
+        condition = self._condition(noisy_norm, base_norm).detach()
+
+        loss = self.lambda_baseline_cfm * self._flow_matching_loss(condition, target_delta, valid_mask=valid_mask)
+        if self.lambda_recon > 0:
+            refined_norm = self._refine_from_base(noisy_norm, base_norm)
+            recon = self._loss_elementwise(refined_norm, clean_norm).squeeze(1)
+            loss = loss + self.lambda_recon * self._masked_mean(recon, valid_mask=valid_mask)
+        return loss
+
+
 @register_model("mecg_e")
 class MECGEDenoiser(ECGDenoisingModel):
     """MECG-E: Mamba-based ECG Enhancer for baseline wander removal
