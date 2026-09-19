@@ -70,6 +70,7 @@ dataset:
 model:
   mecge_checkpoint: null
   require_mecge_checkpoint: true
+  frozen_mecge_loss_fn: "time+com+con"
   fea: "pha"
   norm: False
   fmamba: True

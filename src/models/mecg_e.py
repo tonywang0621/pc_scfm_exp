@@ -1273,7 +1273,10 @@ class MECGEFrozenResidualCFMDenoiser(nn.Module):
         super().__init__()
         self.h = AttrDict(kwargs)
         self.mecge_checkpoint = self.h.get("mecge_checkpoint", None)
-        self.mecge = MECGEDenoiser(**kwargs)
+        mecge_kwargs = dict(kwargs)
+        mecge_kwargs["loss_fn"] = self.h.get("frozen_mecge_loss_fn", "time+com+con")
+        mecge_kwargs["pcscfm_enabled"] = False
+        self.mecge = MECGEDenoiser(**mecge_kwargs)
         if self.mecge_checkpoint:
             self._load_frozen_mecge_checkpoint(self.mecge_checkpoint)
         elif bool(self.h.get("require_mecge_checkpoint", True)):
