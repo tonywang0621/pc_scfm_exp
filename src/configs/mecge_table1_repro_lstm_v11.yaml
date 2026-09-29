@@ -1,0 +1,98 @@
+model_name: lstm_single_residual_v11_ecg
+seed: 3407
+
+training:
+  train_epochs: 30
+  batch_size: 64
+  lr: 5.0e-5
+  optimizer: AdamW
+  betas: [0.8, 0.99]
+  weight_decay: 0.0
+  scheduler: ReduceLROnPlateau
+  factor: 0.5
+  lr_scheduler_patience_epochs: 5
+  lr_scheduler_min_delta: 1.0e-4
+  min_lr: 1.0e-7
+  grad_clip_norm: 0.5
+  early_stopping_patience_epochs: 0
+  early_stopping_min_delta: 1.0e-4
+  selection_metric: val_loss
+
+dataset:
+  name: ecg_baseline_wander
+  pkl_validation_ratio: 0.3
+  pkl_validation_random_state: 1
+  resample_hz: 360
+  window_size: 512
+  normalization: mecge_official_pkl
+
+model:
+  fea: pha
+  norm: false
+  dense_channel: 32
+  compress_factor: 0.3
+  num_tscblocks: 3
+  lstm_hidden: 24
+  lstm_dropout: 0.04
+  norm_epsilon: 1.0e-5
+  attention_position: before_mamba
+  attention_num_blocks: 3
+  attention_conv_kernel_size: 7
+  attention_conv_dilations: [1, 2, 4, 8]
+  attention_conv_dropout: 0.03
+  use_time_attention: true
+  use_freq_attention: true
+  time_frequency_transform: stft
+  learnable_frft_order: false
+  use_dapp: true
+  dapp_time_scales: [5, 9, 15, 25]
+  dapp_freq_scales: [1, 2]
+  dual_noise_head_hidden: 32
+  residual_refine_scale: 0.22
+  baseline_kernel_size: 129
+  sampling_rate: 360
+  n_fft: 64
+  hop_size: 8
+  win_size: 64
+  beta: 2
+  loss_fn: time+mse+com+con+dual_noise+lf+morph+max
+  lambda_mse: 0.95
+  lambda_dual_baseline: 0.30
+  lambda_dual_residual: 0.008
+  lambda_lf: 0.035
+  lambda_morph: 0.04
+  lambda_max: 0.05
+  mad_topk: 8
+  cfm_groups: 8
+  cfm_dropout: 0.06
+  cfm_gate_hidden: 24
+  cfm_inference_steps: 1
+  cfm_train_noise_scale: 0.05
+  cfm_zero_start_prob: 0.5
+  cfm_bridge_noise_scale: 0.0
+  cfm_unet_base_channels: 32
+  cfm_unet_channel_mults: [1, 2, 4]
+  cfm_unet_time_dim: 96
+  cfm_unet_pool_scales: [3, 5, 9, 15]
+  cfm_unet_mid_dilations: [1, 2, 4, 8]
+  cfm_stft_configs: [[32, 4, 32], [64, 8, 64], [128, 16, 128]]
+  lambda_cfm: 0.17
+  lambda_cfm_recon: 0.72
+  lambda_cfm_stft: 0.01
+  lambda_cfm_lf: 0.035
+  lambda_cfm_deriv: 0.03
+  # Two opposite v7 channels each had a curvature weight of 0.04.
+  lambda_cfm_residual_smooth: 0.08
+  v11_low_delta_budget: 0.95
+  v11_high_delta_budget: 0.08
+  v11_low_gate_init: 0.02
+  v11_high_gate_init: 0.017
+  v11_low_gate_max: 0.20
+  v11_high_gate_max: 0.10
+  v11_use_cfm: true
+  v11_use_band_split: true
+  v11_use_dual_head: true
+  v11_adaptive_gate: true
+  v11_feature_dapp: true
+  v11_unet_dapp: true
+  v11_resconv: true
