@@ -1,0 +1,21 @@
+{
+  "baseline_model": "lstm_dualpath_dapp_cfm_unet_bd_no_attention_v7_resconvctx_30epoch_no_patience",
+  "scope": "combined NV1+NV2, seed3407 only",
+  "usage": "Reporting only; never used by training or checkpoint selection.",
+  "sources": [
+    {
+      "source_filename": "original_table1_comparison__official_nv1_nv2.csv",
+      "source_sha256": "4ff355ddcbb5976414e748daadcddb706b9944db3b6400a9c385248f7b2f6c2f",
+      "snapshot": "v14_baseline_v7.csv",
+      "snapshot_sha256": "827d8cc0f105d2da45dd93bbcc5e1ebde7fe4c4726a26af53ff62ec92d5485e8",
+      "rows": 1
+    },
+    {
+      "source_filename": "origiinal_robustness_comparison__official_nv1_nv2.csv",
+      "source_sha256": "f86ad2a1f4ba6a6ab93dca7b8e978e29f6ce6722bd55a7ed4015d63fc92c9197",
+      "snapshot": "v14_baseline_v7_robustness.csv",
+      "snapshot_sha256": "af3cdf6d0871f6af7ded5cfa1370d2096e656f1de9b868afbca57fa486601ae4",
+      "rows": 4
+    }
+  ]
+}
