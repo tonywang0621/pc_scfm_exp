@@ -1,0 +1,97 @@
+data_dir: ../data/mecge_table1_repro
+root_dir: ../runs/v17_performance/v17
+checkpoint_dir: ${root_dir}/checkpoint
+results_dir: ${root_dir}/results
+log_dir: ${root_dir}/log
+exp_name: lstm_v17__qtdb_train_qtdb_test__nv1__seed3407
+model_name: lstm_cooperative_v17_ecg
+seed: 3407
+training:
+  train_epochs: 30
+  batch_size: 64
+  lr: 5.0e-5
+  optimizer: AdamW
+  weight_decay: 0.0
+  betas: [0.8, 0.99]
+  scheduler: ReduceLROnPlateau
+  factor: 0.5
+  lr_scheduler_patience_epochs: 5
+  lr_scheduler_min_delta: 1.0e-4
+  min_lr: 1.0e-7
+  grad_clip_norm: 0.5
+  early_stopping_patience_epochs: 0
+  # Same deterministic full-validation criterion across all objectives.
+  selection_metric: val_ssd
+dataset:
+  name: ecg_baseline_wander
+  pkl_file: ${data_dir}/raw/dataset_bw_nv1.pkl
+  pkl_validation_ratio: 0.3
+  pkl_validation_random_state: 1
+  window_size: 512
+  resample_hz: 360
+  split:
+    strategy: mecge_official_pkl
+    patient_wise: false
+  normalization: mecge_official_pkl
+model:
+  fea: pha
+  norm: false
+  dense_channel: 32
+  compress_factor: 0.3
+  num_tscblocks: 3
+  lstm_hidden: 24
+  lstm_dropout: 0.04
+  attention_position: before_mamba
+  attention_num_blocks: 3
+  attention_conv_kernel_size: 7
+  attention_conv_dilations: [1, 2, 4, 8]
+  attention_conv_dropout: 0.03
+  use_time_attention: true
+  use_freq_attention: true
+  time_frequency_transform: stft
+  use_dapp: true
+  dapp_time_scales: [5, 9, 15, 25]
+  dapp_freq_scales: [1, 2]
+  dual_noise_head_hidden: 32
+  residual_refine_scale: 0.22
+  baseline_kernel_size: 129
+  sampling_rate: 360
+  n_fft: 64
+  hop_size: 8
+  win_size: 64
+  beta: 2
+  loss_fn: time+mse+com+con+lf+morph
+  lambda_mse: 0.95
+  lambda_dual_baseline: 0.30
+  lambda_dual_residual: 0.008
+  lambda_lf: 0.035
+  lambda_morph: 0.04
+  lambda_max: 0.05
+  mad_topk: 8
+  # Sum of the two original velocity-loss weights; one independent target.
+  lambda_cfm: 0.17
+  cfm_inference_steps: 1
+  cfm_groups: 8
+  cfm_dropout: 0.06
+  cfm_unet_base_channels: 32
+  cfm_unet_channel_mults: [1, 2, 4]
+  cfm_unet_time_dim: 96
+  cfm_unet_pool_scales: [3, 5, 9, 15]
+  cfm_unet_mid_dilations: [1, 2, 4, 8]
+  cfm_blocks: 6
+  cfm_dilations: [1, 2, 4, 8]
+  v17_backbone: unet
+  v17_tcn_channels: 64
+  v17_dual_head: true
+  v17_flow: true
+  v17_fm_objective: true
+  v17_independent_paths: true
+  v17_correction_gate: true
+  v17_local_gate: true
+  v17_fixed_gate: false
+  v17_gate_hidden: 16
+  v17_gate_bound: 0.5
+  v17_gate_smooth_kernel: 33
+  v17_bridge_scale: 0.0
+  v17_coarse_weight: 0.25
+  v17_path_weight: 0.12

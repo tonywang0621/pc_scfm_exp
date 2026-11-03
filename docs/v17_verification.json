@@ -1,0 +1,193 @@
+{
+  "generated_utc": "2026-11-03T03:45:36.031291+00:00",
+  "environment": {
+    "python": "3.12.3",
+    "torch": "2.2.2+cpu",
+    "numpy": "1.26.4",
+    "device": "cpu"
+  },
+  "checks": [
+    {
+      "name": "v17_full_suite",
+      "tests": 18,
+      "status": "passed",
+      "log_sha256": "a8a531f60fc5ff442b99b1905c801c5ddc81c8a70c3010bedca8570e088aeaf9"
+    },
+    {
+      "name": "legacy_v12_models",
+      "tests": 9,
+      "status": "passed",
+      "log_sha256": "34321159deb05fc3ea4dd8aefe14add6e8f9d8eacea74ae7bbfe55ff60b72347"
+    },
+    {
+      "name": "parameter_audit_recheck",
+      "tests": 12,
+      "status": "passed",
+      "log_sha256": "4726b21dc9f12364c7689b0141ac6e42fb816ab37e74e8f25126550e0244d626"
+    }
+  ],
+  "synthetic_pipeline": {
+    "variants": 16,
+    "noise_versions": [
+      1,
+      2
+    ],
+    "jobs": 32,
+    "epochs_per_job": 1,
+    "training_batch_size": 2,
+    "reduced_test_dimensions": {
+      "dense_channel": 8,
+      "lstm_hidden": 4,
+      "num_tscblocks": 1,
+      "dual_noise_head_hidden": 8,
+      "cfm_unet_base_channels": 8,
+      "cfm_unet_channel_mults": [
+        1,
+        2
+      ],
+      "cfm_unet_time_dim": 16,
+      "v17_tcn_channels": 8
+    },
+    "checked": [
+      "two checkpoint selectors",
+      "official NV1/NV2 and combined metrics",
+      "four robustness bins",
+      "parameter audits",
+      "reports",
+      "completed-run skipping",
+      "source/config collision rejection",
+      "artifact tamper rejection"
+    ]
+  },
+  "default_size_parameter_audits": [
+    {
+      "model": "v7_max_control",
+      "parameters": 1502792,
+      "dormant_parameter_tensors": [
+        "core.cfm_refine_gate_raw",
+        "core.cfm_baseline_gate_raw",
+        "core.cfm_consistency_blend_raw"
+      ],
+      "compaction": null,
+      "unobserved_gradient_coordinates": 235
+    },
+    {
+      "model": "v12_topk_control",
+      "parameters": 1505339,
+      "dormant_parameter_tensors": [
+        "core.cfm_refine_gate_raw",
+        "core.cfm_baseline_gate_raw",
+        "core.cfm_consistency_blend_raw"
+      ],
+      "compaction": null,
+      "unobserved_gradient_coordinates": 235
+    },
+    {
+      "model": "v12_topk_compact",
+      "parameters": 1489041,
+      "dormant_parameter_tensors": [],
+      "compaction": {
+        "before": 1505339,
+        "after": 1489041,
+        "removed": 16298,
+        "operations": [
+          "fold mask transpose/pointwise convolutions and remove IN-null bias",
+          "fold input LayerNorm affine and paired LSTM biases; absorb context gain",
+          "fold shared final time linear into per-block time projections",
+          "remove normalization-null bias coordinates and duplicate additive offsets"
+        ]
+      },
+      "unobserved_gradient_coordinates": 38
+    },
+    {
+      "model": "v17",
+      "parameters": 1487884,
+      "dormant_parameter_tensors": [],
+      "compaction": {
+        "before": 1503985,
+        "after": 1487884,
+        "removed": 16101,
+        "operations": [
+          "fold mask transpose/pointwise convolutions and remove IN-null bias",
+          "fold input LayerNorm affine and paired LSTM biases; absorb context gain",
+          "fold shared final time linear into per-block time projections",
+          "remove normalization-null bias coordinates and duplicate additive offsets"
+        ]
+      },
+      "unobserved_gradient_coordinates": 26
+    },
+    {
+      "model": "v17_tcn",
+      "parameters": 639405,
+      "dormant_parameter_tensors": [],
+      "compaction": {
+        "before": 654705,
+        "after": 639405,
+        "removed": 15300,
+        "operations": [
+          "fold mask transpose/pointwise convolutions and remove IN-null bias",
+          "fold input LayerNorm affine and paired LSTM biases; absorb context gain",
+          "fold shared final time linear into per-block time projections",
+          "remove normalization-null bias coordinates and duplicate additive offsets"
+        ]
+      },
+      "unobserved_gradient_coordinates": 26
+    },
+    {
+      "model": "v17_half_flow",
+      "parameters": 729340,
+      "dormant_parameter_tensors": [],
+      "compaction": {
+        "before": 744881,
+        "after": 729340,
+        "removed": 15541,
+        "operations": [
+          "fold mask transpose/pointwise convolutions and remove IN-null bias",
+          "fold input LayerNorm affine and paired LSTM biases; absorb context gain",
+          "fold shared final time linear into per-block time projections",
+          "remove normalization-null bias coordinates and duplicate additive offsets"
+        ]
+      },
+      "unobserved_gradient_coordinates": 26
+    },
+    {
+      "model": "v17_direct",
+      "parameters": 1410892,
+      "dormant_parameter_tensors": [],
+      "compaction": {
+        "before": 1503985,
+        "after": 1410892,
+        "removed": 93093,
+        "operations": [
+          "fold mask transpose/pointwise convolutions and remove IN-null bias",
+          "fold input LayerNorm affine and paired LSTM biases; absorb context gain",
+          "fold shared final time linear into per-block time projections",
+          "remove normalization-null bias coordinates and duplicate additive offsets",
+          "direct control only: fold fixed time and remove zero state inputs"
+        ]
+      },
+      "unobserved_gradient_coordinates": 27
+    }
+  ],
+  "real_dataset_training_performed": false,
+  "gpu_verified": false,
+  "limitations": [
+    "Synthetic tests do not establish ECG performance.",
+    "Finite gradient probes do not prove all statistical redundancy absent.",
+    "Unobserved gradient coordinates in active PReLU tensors are retained and reported."
+  ],
+  "source_sha256": {
+    "scripts/run_v17_ablation.sh": "b776f56fa50d39825a1219a3e7fa1ed3b1f751231336a7c318e8bec579ecd195",
+    "src/configs/mecge_table1_repro_lstm_v17.yaml": "8a0a2db5a893ce9614168cc60eea6ad9764155d7f28ece523c2bef8002f7ba83",
+    "src/mecge_table1_run_v17_model.py": "a8b9c8ac28865eb52094aeef055be0796e797c10760057cc78f8f791e38fcb4a",
+    "src/models/lstm_v17/__init__.py": "7c58dd3ed15d2fb3c749afbed72eed053a391b76999c4638678f7b371b92c22c",
+    "src/models/lstm_v17/audit.py": "e2c6ec03986c0160efc62ad65ea93a27df01c501a255a0330ef2b1a8ee34d358",
+    "src/models/lstm_v17/compact.py": "312df34a15d0069ce196cf7d20768a4e881f8f072a273674eab7a1c5acfbf8f3",
+    "src/models/lstm_v17/direct.py": "eab80526c32487bc2e41ca2a1b759fffa9d57144395782cea13cb63a8d45dbb1",
+    "src/v17_experiments.py": "2c414d07331c6fe9670a5de25020cc262e458e94aee129b0547d9441c91fcb10",
+    "src/v17_results.py": "dc8a3f1d45784696727cbbb556e0cbe4a0f1ff9fbe39be7dd052053d02ee8398",
+    "tests/test_v17_model.py": "55138745ad10f7a15d3649f3a18dd5a7d6642566a5715adb556b24f1a44ed91c",
+    "tests/test_v17_pipeline.py": "e5bd55996f684cadf71807433b75d156d703463853975871cfd49f87c1b7f743",
+    "tests/test_v17_runner.py": "ce97d5352a67823a422f2a207543a1a5b07352c754ed327ff360c0d407b69ad8"
+  }
+}
