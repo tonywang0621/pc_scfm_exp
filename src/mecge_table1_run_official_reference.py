@@ -31,11 +31,16 @@ def parse_args():
     parser.add_argument("--max-epochs", type=int, default=50000)
     parser.add_argument("--early-stopping-patience", default=30)
     parser.add_argument("--skip-train", action="store_true")
+    parser.add_argument("--backbone", choices=("m0", "m1", "m2"), default="m0")
+    parser.add_argument("--gdn-dir", default=str(Path(__file__).resolve().parents[1] / "references/GatedDeltaNet-2"))
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    # Import before removing the local src directory from sys.path below.
+    if args.backbone != "m0":
+        from mecge_gdn_backbone import install_backbone
     import random
 
     import numpy as np
@@ -70,6 +75,14 @@ def main():
     sys.modules.pop("models", None)
 
     from pipeline import train_dl, test_dl
+    if args.backbone != "m0":
+        import pipeline
+        original_model = pipeline.MECGE
+
+        def make_model(config):
+            return install_backbone(original_model(config), args.backbone, args.gdn_dir)
+
+        pipeline.MECGE = make_model
 
     random.seed(3407)
     np.random.seed(3407)
